@@ -117,7 +117,8 @@ class CoffeeShopGateway:
         eof_received = {
             DataType.USERS: False,
             DataType.TRANSACTIONS: False,
-            DataType.TRANSACTION_ITEMS: False
+            DataType.TRANSACTION_ITEMS: False,
+            DataType.STORES: False
         }
         
         # Flag para controlar el inicio del consumo de resultados
