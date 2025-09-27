@@ -89,13 +89,12 @@ class StoresEnrichmentWorker:
             logger.info("EOF recibido para stores")
             self.stores_eof_received = True
             self.stores_loaded = True
+            self.stores_middleware.stop_consuming()  # Cerrar stores después del EOF
             self._check_completion()
             return
 
         if isinstance(message, list):
             self.process_stores_batch(message)
-
-        self.stores_middleware.stop_consuming()
         
 
     def enrich_transaction(self, transaction: Dict[str, Any]) -> Dict[str, Any]:
