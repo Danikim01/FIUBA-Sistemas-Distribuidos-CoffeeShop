@@ -18,9 +18,6 @@ COPY src/gateway/ .
 # Set Python path
 ENV PYTHONPATH=/app
 
-RUN groupadd -r appuser && useradd -r -g appuser appuser
-RUN chown -R appuser:appuser /app
-USER appuser
 
 EXPOSE 12345
 

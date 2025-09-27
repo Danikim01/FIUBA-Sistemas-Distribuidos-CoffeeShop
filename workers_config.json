@@ -7,7 +7,7 @@
     "gateway": {
       "OUTPUT_QUEUE": "transactions_raw",
       "RESULTS_QUEUE": "gateway_results",
-      "CHUNK_SIZE": 100
+      "CHUNK_SIZE": 500
     },
     "client": {}
   },
@@ -45,6 +45,18 @@
           "environment": {
             "INPUT_QUEUE": "transactions_time_filtered",
             "OUTPUT_QUEUE": "transactions_final_results"
+          }
+        }
+      ]
+    },
+    "stores_enrichment": {
+      "prefetch_count": 20,
+      "groups": [
+        {
+          "count": 1,
+          "environment": {
+            "INPUT_QUEUE": "transactions_raw",
+            "OUTPUT_QUEUE": "transactions_enriched"
           }
         }
       ]

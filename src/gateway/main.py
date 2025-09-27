@@ -34,6 +34,9 @@ class CoffeeShopGateway:
         
         # Cola de salida configurable para enviar transacciones
         self.transactions_queue_name = os.getenv('OUTPUT_QUEUE', 'transactions_raw')
+        
+        # Cola para enviar stores al enrichment worker
+        self.stores_queue_name = os.getenv('STORES_QUEUE', 'stores_raw')
 
         # Cola para recibir resultados procesados desde ResultsWorker
         self.results_queue_name = os.getenv('RESULTS_QUEUE', 'gateway_results')
@@ -48,8 +51,16 @@ class CoffeeShopGateway:
             port=self.rabbitmq_port
         )
         
+        # Middleware para enviar stores al enrichment worker
+        self.stores_queue = RabbitMQMiddlewareQueue(
+            host=self.rabbitmq_host,
+            queue_name=self.stores_queue_name,
+            port=self.rabbitmq_port
+        )
+        
         logger.info(f"Gateway configurado con RabbitMQ: {self.rabbitmq_host}:{self.rabbitmq_port}")
         logger.info(f"Cola de transacciones: {self.transactions_queue_name}")
+        logger.info(f"Cola de stores: {self.stores_queue_name}")
         logger.info(f"Cola de resultados: {self.results_queue_name}")
         logger.info(f"Chunking configurado: {self.chunk_size} transacciones por chunk")
     
@@ -131,6 +142,8 @@ class CoffeeShopGateway:
 
                         if newly_marked and data_type == DataType.TRANSACTIONS:
                             self.propagate_transactions_eof()
+                        elif newly_marked and data_type == DataType.STORES:
+                            self.propagate_stores_eof()
 
                         if all(eof_received.values()):
                             self.forward_results_to_client(client_socket)
@@ -180,6 +193,24 @@ class CoffeeShopGateway:
                     logger.info(f"Enviados {len(chunks)} chunks con {len(rows)} transacciones totales")
                 except Exception as e:
                     logger.error(f"Error enviando chunks a RabbitMQ: {e}")
+            elif data_type == DataType.STORES:
+                logger.info(f"Procesando {len(rows)} stores para enriquecimiento")
+                try:
+                    # Enviar stores directamente (sin chunking, son pocos)
+                    self.stores_queue.send(rows)
+                    logger.info(f"Enviados {len(rows)} stores al enrichment worker")
+                except Exception as e:
+                    logger.error(f"Error enviando stores a RabbitMQ: {e}")
+            
+            # Si son stores, enviarlos al enrichment worker
+            elif data_type == DataType.STORES:
+                logger.info(f"Procesando {len(rows)} stores para enriquecimiento")
+                try:
+                    # Enviar stores directamente (sin chunking, son pocos)
+                    self.stores_queue.send(rows)
+                    logger.info(f"Enviados {len(rows)} stores al enrichment worker")
+                except Exception as e:
+                    logger.error(f"Error enviando stores a RabbitMQ: {e}")
             
             # Send success response
             send_response(client_socket, True)
@@ -228,6 +259,14 @@ class CoffeeShopGateway:
             logger.info("Propagated EOF to transactions pipeline")
         except Exception as exc:
             logger.error(f"Failed to propagate EOF to transactions queue: {exc}")
+
+    def propagate_stores_eof(self):
+        """Propaga un mensaje EOF a la cola de stores."""
+        try:
+            self.stores_queue.send({'type': 'EOF'})
+            logger.info("Propagated EOF to stores queue")
+        except Exception as exc:
+            logger.error(f"Failed to propagate EOF to stores queue: {exc}")
 
     def _send_json_line(self, client_socket: socket.socket, payload: Any) -> None:
         message = json.dumps(payload, ensure_ascii=False) + '\n'

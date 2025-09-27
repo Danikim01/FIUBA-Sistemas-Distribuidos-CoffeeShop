@@ -25,6 +25,13 @@ def unpack_float32_from_string(data: bytes, offset: int) -> tuple[float, int]:
     float_str = data[new_offset:new_offset + length].decode('utf-8')
     return float(float_str), new_offset + length
 
+def unpack_float32(data: bytes, offset: int) -> tuple[float, int]:
+    """Unpack 32-bit float from bytes (big-endian)"""
+    import struct
+    float_bytes = data[offset:offset + 4]
+    value = struct.unpack('>f', float_bytes)[0]
+    return value, offset + 4
+
 def unpack_string(data: bytes, offset: int) -> tuple[str, int]:
     """Unpack string with length prefix, return (string, new_offset)"""
     length, new_offset = unpack_uint32(data, offset)
@@ -39,6 +46,7 @@ class DataType(IntEnum):
     TRANSACTIONS = 1
     TRANSACTION_ITEMS = 2
     USERS = 3
+    STORES = 4
 
 class ResponseCode(IntEnum):
     OK = 0
@@ -139,6 +147,18 @@ def deserialize_user(data: bytes, offset: int) -> tuple[Dict[str, Any], int]:
     
     return user, offset
 
+def deserialize_store(data: bytes, offset: int) -> tuple[Dict[str, Any], int]:
+    """Deserialize store from bytes - only relevant fields for enrichment"""
+    store = {}
+    
+    # store_id (int)
+    store['store_id'], offset = unpack_uint32(data, offset)
+    
+    # store_name (string)
+    store['store_name'], offset = unpack_string(data, offset)
+    
+    return store, offset
+
 def send_response(sock: socket.socket, success: bool) -> None:
     """Send response (OK or ERROR)"""
     # Calculate total message size (total_size + response_code)
@@ -196,6 +216,8 @@ def parse_batch_message(message_data: bytes) -> tuple[DataType, List[Dict[str, A
             row, offset = deserialize_transaction_item(message_data, offset)
         elif data_type == DataType.USERS:
             row, offset = deserialize_user(message_data, offset)
+        elif data_type == DataType.STORES:
+            row, offset = deserialize_store(message_data, offset)
         else:
             raise ValueError(f"Unknown data type: {data_type}")
         

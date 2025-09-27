@@ -38,8 +38,9 @@ MAX_ROW_SIZES = {
                                     # voucher_id(4) + user_id(4) + amounts(12) + created_at(23) + overhead(4)
     DataType.TRANSACTION_ITEMS: 83,  # transaction_id(40) + item_id(4) + quantity(4) + 
                                      # unit_price(4) + subtotal(4) + created_at(23) + overhead(4)
-    DataType.USERS: 56              # user_id(4) + gender(11) + birthdate(14) + 
+    DataType.USERS: 56,             # user_id(4) + gender(11) + birthdate(14) + 
                                     # registered_at(23) + overhead(4)
+    DataType.STORES: 60             # store_id(4) + store_name(50) + overhead(6)
 }
 
 def get_max_row_size(data_type: DataType) -> int:
@@ -336,6 +337,11 @@ class CoffeeShopClient:
         # Calculate how many rows fit in the KB limit
         optimal_batch_size = max(1, int(max_batch_size_bytes / max_row_size))
         
+        # Special handling for stores (usually small files)
+        if data_type == DataType.STORES:
+            # For stores, use a smaller batch size since files are typically small
+            optimal_batch_size = min(optimal_batch_size, 100)
+        
         # Cap at reasonable maximum to avoid memory issues
         optimal_batch_size = min(optimal_batch_size, 10000)
         
@@ -398,9 +404,10 @@ class CoffeeShopClient:
             
             # Send data for each type in order
             data_types = [
-                (DataType.USERS, 'users'),
+                #(DataType.USERS, 'users'),
+                (DataType.STORES, 'stores'),
                 (DataType.TRANSACTIONS, 'transactions'), 
-                (DataType.TRANSACTION_ITEMS, 'transaction_items')
+                #(DataType.TRANSACTION_ITEMS, 'transaction_items'),
             ]
             
             for data_type, data_type_str in data_types:

@@ -43,6 +43,7 @@ class DataType(IntEnum):
     TRANSACTIONS = 1
     TRANSACTION_ITEMS = 2
     USERS = 3
+    STORES = 4
 
 class ResponseCode(IntEnum):
     OK = 0
@@ -129,6 +130,19 @@ def serialize_transaction_item(row: Dict[str, Any]) -> bytes:
     
     return data
 
+def serialize_store(row: Dict[str, Any]) -> bytes:
+    """Serialize store row to bytes - only relevant fields for enrichment"""
+    data = b''
+    
+    # store_id (int)
+    data += pack_uint32(int(row['store_id']))
+    
+    # store_name (string)
+    data += pack_string(row['store_name'])
+    
+    return data
+
+
 def serialize_user(row: Dict[str, Any]) -> bytes:
     """Serialize user row to bytes"""
     data = b''
@@ -154,7 +168,7 @@ def send_batch(sock: socket.socket, data_type: DataType, rows: List[Dict[str, An
     Protocol:
     - Total Message Size (4 bytes): size of entire message including this field
     - Message Type (4 bytes): BATCH
-    - Data Type (4 bytes): TRANSACTIONS, TRANSACTION_ITEMS, or USERS  
+    - Data Type (4 bytes): TRANSACTIONS, TRANSACTION_ITEMS, USERS or STORES  
     - Data Size (4 bytes): size in bytes of serialized data
     - Rows: serialized row data
     """
@@ -168,6 +182,8 @@ def send_batch(sock: socket.socket, data_type: DataType, rows: List[Dict[str, An
             serialized_rows += serialize_transaction_item(row)
         elif data_type == DataType.USERS:
             serialized_rows += serialize_user(row)
+        elif data_type == DataType.STORES:
+            serialized_rows += serialize_store(row)
         else:
             raise ValueError(f"Unknown data type: {data_type}")
     
@@ -192,7 +208,7 @@ def send_eof(sock: socket.socket, data_type: DataType) -> None:
     Protocol:
     - Total Message Size (4 bytes): size of entire message including this field
     - Message Type (4 bytes): EOF
-    - Data Type (4 bytes): TRANSACTIONS, TRANSACTION_ITEMS, or USERS
+    - Data Type (4 bytes): TRANSACTIONS, TRANSACTION_ITEMS, USERS or STORES
     """
     # Calculate total message size (total_size + msg_type + data_type)
     total_message_size = 4 + 4 + 4
