@@ -25,7 +25,8 @@ class CoffeeShopGateway:
         self.data_storage = {
             DataType.USERS: [],
             DataType.TRANSACTIONS: [],
-            DataType.TRANSACTION_ITEMS: []
+            DataType.TRANSACTION_ITEMS: [],
+            DataType.MENU_ITEMS: [],
         }
         
         # Configurar RabbitMQ para enviar transacciones a workers
@@ -37,6 +38,12 @@ class CoffeeShopGateway:
         
         # Cola para enviar stores al enrichment worker
         self.stores_queue_name = os.getenv('STORES_QUEUE', 'stores_raw')
+
+        # Cola para enviar transaction items a su pipeline
+        self.transaction_items_queue_name = os.getenv('TRANSACTION_ITEMS_QUEUE', 'transaction_items_raw')
+
+        # Cola para enviar menu items al pipeline de agregación
+        self.menu_items_queue_name = os.getenv('MENU_ITEMS_QUEUE', 'menu_items_raw')
 
         # Cola para recibir resultados procesados desde ResultsWorker
         self.results_queue_name = os.getenv('RESULTS_QUEUE', 'gateway_results')
@@ -57,10 +64,26 @@ class CoffeeShopGateway:
             queue_name=self.stores_queue_name,
             port=self.rabbitmq_port
         )
-        
+
+        # Middleware para enviar transaction items a su pipeline
+        self.transaction_items_queue = RabbitMQMiddlewareQueue(
+            host=self.rabbitmq_host,
+            queue_name=self.transaction_items_queue_name,
+            port=self.rabbitmq_port
+        )
+
+        # Middleware para enviar menu items al pipeline de agregación
+        self.menu_items_queue = RabbitMQMiddlewareQueue(
+            host=self.rabbitmq_host,
+            queue_name=self.menu_items_queue_name,
+            port=self.rabbitmq_port
+        )
+
         logger.info(f"Gateway configurado con RabbitMQ: {self.rabbitmq_host}:{self.rabbitmq_port}")
         logger.info(f"Cola de transacciones: {self.transactions_queue_name}")
         logger.info(f"Cola de stores: {self.stores_queue_name}")
+        logger.info(f"Cola de transaction items: {self.transaction_items_queue_name}")
+        logger.info(f"Cola de menu items: {self.menu_items_queue_name}")
         logger.info(f"Cola de resultados: {self.results_queue_name}")
         logger.info(f"Chunking configurado: {self.chunk_size} transacciones por chunk")
     
@@ -118,7 +141,8 @@ class CoffeeShopGateway:
             DataType.USERS: False,
             DataType.TRANSACTIONS: False,
             DataType.TRANSACTION_ITEMS: False,
-            DataType.STORES: False
+            DataType.STORES: False,
+            DataType.MENU_ITEMS: False
         }
         
         # Flag para controlar el inicio del consumo de resultados
@@ -145,6 +169,10 @@ class CoffeeShopGateway:
                             self.propagate_transactions_eof()
                         elif newly_marked and data_type == DataType.STORES:
                             self.propagate_stores_eof()
+                        elif newly_marked and data_type == DataType.TRANSACTION_ITEMS:
+                            self.propagate_transaction_items_eof()
+                        elif newly_marked and data_type == DataType.MENU_ITEMS:
+                            self.propagate_menu_items_eof()
 
                         if all(eof_received.values()):
                             self.forward_results_to_client(client_socket)
@@ -197,21 +225,37 @@ class CoffeeShopGateway:
             elif data_type == DataType.STORES:
                 logger.info(f"Procesando {len(rows)} stores para enriquecimiento")
                 try:
-                    # Enviar stores directamente (sin chunking, son pocos)
                     self.stores_queue.send(rows)
                     logger.info(f"Enviados {len(rows)} stores al enrichment worker")
                 except Exception as e:
                     logger.error(f"Error enviando stores a RabbitMQ: {e}")
-            
-            # Si son stores, enviarlos al enrichment worker
-            elif data_type == DataType.STORES:
-                logger.info(f"Procesando {len(rows)} stores para enriquecimiento")
+            elif data_type == DataType.TRANSACTION_ITEMS:
+                logger.info(
+                    "Procesando %s transaction items con chunking (chunk_size=%s)",
+                    len(rows),
+                    self.chunk_size,
+                )
                 try:
-                    # Enviar stores directamente (sin chunking, son pocos)
-                    self.stores_queue.send(rows)
-                    logger.info(f"Enviados {len(rows)} stores al enrichment worker")
+                    chunks = self.create_chunks(rows)
+                    logger.info("Creando %s chunks de transaction items", len(chunks))
+
+                    for i, chunk in enumerate(chunks):
+                        self.transaction_items_queue.send(chunk)
+                        logger.info(
+                            "Enviado chunk %s/%s con %s transaction items",
+                            i + 1,
+                            len(chunks),
+                            len(chunk),
+                        )
                 except Exception as e:
-                    logger.error(f"Error enviando stores a RabbitMQ: {e}")
+                    logger.error(f"Error enviando transaction items a RabbitMQ: {e}")
+            elif data_type == DataType.MENU_ITEMS:
+                logger.info(f"Procesando {len(rows)} menu items para agregación")
+                try:
+                    self.menu_items_queue.send(rows)
+                    logger.info("Menu items enviados a la cola %s", self.menu_items_queue_name)
+                except Exception as e:
+                    logger.error(f"Error enviando menu items a RabbitMQ: {e}")
             
             # Send success response
             send_response(client_socket, True)
@@ -268,6 +312,22 @@ class CoffeeShopGateway:
             logger.info("Propagated EOF to stores queue")
         except Exception as exc:
             logger.error(f"Failed to propagate EOF to stores queue: {exc}")
+
+    def propagate_transaction_items_eof(self):
+        """Propaga EOF a la cola de transaction items."""
+        try:
+            self.transaction_items_queue.send({'type': 'EOF'})
+            logger.info("Propagated EOF to transaction items queue")
+        except Exception as exc:
+            logger.error(f"Failed to propagate EOF to transaction items queue: {exc}")
+
+    def propagate_menu_items_eof(self):
+        """Propaga EOF a la cola de menu items."""
+        try:
+            self.menu_items_queue.send({'type': 'EOF'})
+            logger.info("Propagated EOF to menu items queue")
+        except Exception as exc:
+            logger.error(f"Failed to propagate EOF to menu items queue: {exc}")
 
     def _send_json_line(self, client_socket: socket.socket, payload: Any) -> None:
         message = json.dumps(payload, ensure_ascii=False) + '\n'

@@ -40,7 +40,8 @@ MAX_ROW_SIZES = {
                                      # unit_price(4) + subtotal(4) + created_at(23) + overhead(4)
     DataType.USERS: 56,             # user_id(4) + gender(11) + birthdate(14) + 
                                     # registered_at(23) + overhead(4)
-    DataType.STORES: 60             # store_id(4) + store_name(50) + overhead(6)
+    DataType.STORES: 60,            # store_id(4) + store_name(50) + overhead(6)
+    DataType.MENU_ITEMS: 88         # item metadata fields (id, name, category, price, flags)
 }
 
 def get_max_row_size(data_type: DataType) -> int:
@@ -75,8 +76,10 @@ class CoffeeShopClient:
         self.data_dir = '.data'
         self.socket: socket.socket | None = None
         self.results_received = 0
-        self._results_header_printed = False
         self._tpv_header_printed = False
+        self._quantity_header_printed = False
+        self._profit_header_printed = False
+        self._results_header_printed = False
 
         logger.info(
             f"Client configured - Gateway: {self.gateway_host}:{self.gateway_port}, "
@@ -112,6 +115,77 @@ class CoffeeShopClient:
         print("entre las 06:00 AM y las 11:00 PM con monto total >= $75")
         print("=" * 60)
         self._results_header_printed = True
+        
+    def _print_results_summary(self) -> None:
+        self._print_results_header()
+        print(
+            "Total de transacciones que cumplen las condiciones: "
+            f"{self.results_received}"
+        )
+        print("-" * 50)
+        logger.info(
+            "Reported total of %s transacciones filtradas por monto al usuario",
+            self.results_received,
+        )
+
+    def _render_top_items_table(
+        self,
+        title: str,
+        rows: List[Dict[str, Any]],
+        metric_key: str,
+        header_flag_attr: str,
+    ) -> None:
+        if not getattr(self, header_flag_attr):
+            print("=" * 60)
+            print(title)
+            print("=" * 60)
+            setattr(self, header_flag_attr, True)
+
+        if not rows:
+            print("Sin registros que cumplan las condiciones.")
+            print("-" * 50)
+            return
+
+        metric_label = metric_key
+        print(f"year_month_created_at - item_name - {metric_label}")
+
+        for row in rows:
+            year_month = row.get('year_month_created_at', '')
+            item_name = row.get('item_name', 'Desconocido')
+            value = row.get(metric_key, 0)
+
+            if metric_key == 'profit_sum':
+                try:
+                    value_str = f"{float(value):.2f}"
+                except (TypeError, ValueError):
+                    value_str = "0.00"
+            else:
+                try:
+                    value_str = f"{int(value)}"
+                except (TypeError, ValueError):
+                    value_str = "0"
+
+            print(f"{year_month} - {item_name} - {value_str}")
+
+        print("-" * 50)
+
+    def _render_top_items_by_quantity(self, payload: Dict[str, Any]) -> None:
+        rows = payload.get('results') or []
+        self._render_top_items_table(
+            "TOP ÍTEMS POR CANTIDAD (2024-2025, 06:00-23:00)",
+            rows,
+            'sellings_qty',
+            '_quantity_header_printed',
+        )
+
+    def _render_top_items_by_profit(self, payload: Dict[str, Any]) -> None:
+        rows = payload.get('results') or []
+        self._render_top_items_table(
+            "TOP ÍTEMS POR GANANCIA (2024-2025, 06:00-23:00)",
+            rows,
+            'profit_sum',
+            '_profit_header_printed',
+        )
 
     def _handle_single_result(self, result: Dict[str, Any]) -> bool:
         """Print a single result message received from the results stream.
@@ -133,6 +207,12 @@ class CoffeeShopClient:
                 return False
             if normalized_type == 'TPV_SUMMARY':
                 self._render_tpv_summary(result)
+                return True
+            if normalized_type == 'TOP_ITEMS_BY_QUANTITY':
+                self._render_top_items_by_quantity(result)
+                return True
+            if normalized_type == 'TOP_ITEMS_BY_PROFIT':
+                self._render_top_items_by_profit(result)
                 return True
 
         self.results_received += 1
@@ -179,18 +259,6 @@ class CoffeeShopClient:
             )
         except Exception as exc:
             logger.error(f"Failed to render TPV summary: {exc}")
-
-    def _print_results_summary(self) -> None:
-        self._print_results_header()
-        print(
-            "Total de transacciones que cumplen las condiciones: "
-            f"{self.results_received}"
-        )
-        print("-" * 50)
-        logger.info(
-            "Reported total of %s transacciones filtradas por monto al usuario",
-            self.results_received,
-        )
 
     def _handle_results_message(self, message: Any) -> bool:
         """Handle stream messages that may contain individual or batched results.
@@ -404,10 +472,11 @@ class CoffeeShopClient:
             
             # Send data for each type in order
             data_types = [
-                #(DataType.USERS, 'users'),
+                (DataType.USERS, 'users'),
                 (DataType.STORES, 'stores'),
-                (DataType.TRANSACTIONS, 'transactions'), 
-                #(DataType.TRANSACTION_ITEMS, 'transaction_items'),
+                (DataType.MENU_ITEMS, 'menu_items'),
+                (DataType.TRANSACTIONS, 'transactions'),
+                (DataType.TRANSACTION_ITEMS, 'transaction_items'),
             ]
             
             for data_type, data_type_str in data_types:
