@@ -84,6 +84,24 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         },
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
     },
+    "items_top": {
+        "display_name": "Top Items Workers",
+        "base_service_name": "items-top-worker",
+        "command": ["python", "items_top_worker.py"],
+        "needs_worker_id": False,
+        "supports_prefetch": True,
+        "default_prefetch": 20,
+        "default_environment": {
+            "ITEMS_INPUT_QUEUE": "transaction_items_raw",
+            "MENU_ITEMS_INPUT_QUEUE": "menu_items_raw",
+            "OUTPUT_QUEUE": "transactions_final_results",
+        },
+        "required_environment": [
+            "ITEMS_INPUT_QUEUE",
+            "MENU_ITEMS_INPUT_QUEUE",
+            "OUTPUT_QUEUE",
+        ],
+    },
     "results": {
         "display_name": "Results Workers",
         "base_service_name": "results-worker",
@@ -104,6 +122,8 @@ SERVICE_ENV_DEFAULTS: Dict[str, Dict[str, str]] = {
         "RABBITMQ_HOST": "rabbitmq",
         "RABBITMQ_PORT": "5672",
         "OUTPUT_QUEUE": WORKER_DEFINITIONS["year_filter"]["default_environment"]["INPUT_QUEUE"],
+        "TRANSACTION_ITEMS_QUEUE": WORKER_DEFINITIONS["items_top"]["default_environment"]["ITEMS_INPUT_QUEUE"],
+        "MENU_ITEMS_QUEUE": WORKER_DEFINITIONS["items_top"]["default_environment"]["MENU_ITEMS_INPUT_QUEUE"],
         "RESULTS_QUEUE": "gateway_results",
     },
     "client": {
@@ -551,7 +571,7 @@ def generate_compose(config: Dict[str, object]) -> str:
 
     base_services = render_base_services(config.get("service_environment"))
 
-    compose_parts = ["version: '3.8'", "", base_services.rstrip()]
+    compose_parts = [base_services.rstrip()]
     if worker_sections:
         compose_parts.append("")
         compose_parts.append("\n".join(worker_sections).rstrip())

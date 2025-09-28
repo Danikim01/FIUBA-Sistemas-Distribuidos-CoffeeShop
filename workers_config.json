@@ -7,6 +7,8 @@
     "gateway": {
       "OUTPUT_QUEUE": "transactions_raw",
       "RESULTS_QUEUE": "gateway_results",
+      "TRANSACTION_ITEMS_QUEUE": "transaction_items_raw",
+      "MENU_ITEMS_QUEUE": "menu_items_raw",
       "CHUNK_SIZE": 500
     },
     "client": {}
@@ -73,6 +75,19 @@
         }
       ]
     },
+    "items_top": {
+      "prefetch_count": 20,
+      "groups": [
+        {
+          "count": 1,
+          "environment": {
+            "ITEMS_INPUT_QUEUE": "transaction_items_raw",
+            "MENU_ITEMS_INPUT_QUEUE": "menu_items_raw",
+            "OUTPUT_QUEUE": "transactions_final_results"
+          }
+        }
+      ]
+    },
     "results": {
       "groups": [
         {
@@ -80,7 +95,7 @@
           "environment": {
             "INPUT_QUEUE": "transactions_final_results",
             "OUTPUT_QUEUE": "gateway_results",
-            "EXPECTED_EOF_COUNT": 2
+            "EXPECTED_EOF_COUNT": 3
           }
         }
       ]
