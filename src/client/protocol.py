@@ -44,6 +44,7 @@ class DataType(IntEnum):
     TRANSACTION_ITEMS = 2
     USERS = 3
     STORES = 4
+    MENU_ITEMS = 5
 
 class ResponseCode(IntEnum):
     OK = 0
@@ -143,6 +144,35 @@ def serialize_store(row: Dict[str, Any]) -> bytes:
     return data
 
 
+def serialize_menu_item(row: Dict[str, Any]) -> bytes:
+    """Serialize menu item row to bytes."""
+    data = b''
+
+    # item_id (int)
+    data += pack_uint32(int(row['item_id']))
+
+    # item_name (string)
+    data += pack_string(row['item_name'])
+
+    # category (string)
+    data += pack_string(row.get('category', ''))
+
+    # price (float)
+    price = float(row['price']) if row.get('price') else 0.0
+    data += pack_float32(price)
+
+    # is_seasonal (string boolean representation)
+    data += pack_string(str(row.get('is_seasonal', '')))
+
+    # available_from (string)
+    data += pack_string(row.get('available_from', ''))
+
+    # available_to (string)
+    data += pack_string(row.get('available_to', ''))
+
+    return data
+
+
 def serialize_user(row: Dict[str, Any]) -> bytes:
     """Serialize user row to bytes"""
     data = b''
@@ -184,6 +214,8 @@ def send_batch(sock: socket.socket, data_type: DataType, rows: List[Dict[str, An
             serialized_rows += serialize_user(row)
         elif data_type == DataType.STORES:
             serialized_rows += serialize_store(row)
+        elif data_type == DataType.MENU_ITEMS:
+            serialized_rows += serialize_menu_item(row)
         else:
             raise ValueError(f"Unknown data type: {data_type}")
     

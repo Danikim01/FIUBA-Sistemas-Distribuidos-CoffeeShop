@@ -47,6 +47,7 @@ class DataType(IntEnum):
     TRANSACTION_ITEMS = 2
     USERS = 3
     STORES = 4
+    MENU_ITEMS = 5
 
 class ResponseCode(IntEnum):
     OK = 0
@@ -159,6 +160,21 @@ def deserialize_store(data: bytes, offset: int) -> tuple[Dict[str, Any], int]:
     
     return store, offset
 
+
+def deserialize_menu_item(data: bytes, offset: int) -> tuple[Dict[str, Any], int]:
+    """Deserialize menu item from bytes."""
+    menu_item: Dict[str, Any] = {}
+
+    menu_item['item_id'], offset = unpack_uint32(data, offset)
+    menu_item['item_name'], offset = unpack_string(data, offset)
+    menu_item['category'], offset = unpack_string(data, offset)
+    menu_item['price'], offset = unpack_float32_from_string(data, offset)
+    menu_item['is_seasonal'], offset = unpack_string(data, offset)
+    menu_item['available_from'], offset = unpack_string(data, offset)
+    menu_item['available_to'], offset = unpack_string(data, offset)
+
+    return menu_item, offset
+
 def send_response(sock: socket.socket, success: bool) -> None:
     """Send response (OK or ERROR)"""
     # Calculate total message size (total_size + response_code)
@@ -218,6 +234,8 @@ def parse_batch_message(message_data: bytes) -> tuple[DataType, List[Dict[str, A
             row, offset = deserialize_user(message_data, offset)
         elif data_type == DataType.STORES:
             row, offset = deserialize_store(message_data, offset)
+        elif data_type == DataType.MENU_ITEMS:
+            row, offset = deserialize_menu_item(message_data, offset)
         else:
             raise ValueError(f"Unknown data type: {data_type}")
         
