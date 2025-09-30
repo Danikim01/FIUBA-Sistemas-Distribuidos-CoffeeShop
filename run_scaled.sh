@@ -10,4 +10,4 @@ docker compose stop $(docker compose ps --services | grep -v rabbitmq) 2>/dev/nu
 docker compose rm -f $(docker compose ps --services | grep -v rabbitmq) 2>/dev/null || true
 
 scripts/generate_scaled_compose.py --config "${CONFIG_PATH}" --output docker-compose.yml
-docker-compose -f docker-compose.yml up --build -d
+docker compose -f docker-compose.yml up --build -d
