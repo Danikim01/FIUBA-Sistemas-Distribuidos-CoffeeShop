@@ -21,6 +21,7 @@ class WorkerDefinition(TypedDict):
     default_prefetch: Optional[int]
     default_environment: Dict[str, str]
     required_environment: List[str]
+    scalable: bool
 
 
 @dataclass
@@ -44,6 +45,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
             "OUTPUT_QUEUE": "transactions_year_filtered"
         },
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
+        "scalable": True,
     },
     "time_filter": {
         "display_name": "Time Filter Workers",
@@ -57,6 +59,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
             "OUTPUT_QUEUE": "transactions_time_filtered",
         },
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
+        "scalable": True,
     },
     "amount_filter": {
         "display_name": "Amount Filter Workers",
@@ -70,6 +73,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
             "OUTPUT_QUEUE": "transactions_final_results",
         },
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
+        "scalable": True,
     },
     "transactions_projection": {
         "display_name": "Transactions Projection Workers",
@@ -83,6 +87,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
             "OUTPUT_QUEUE": "transactions_compact",
         },
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
+        "scalable": True,
     },
     "stores_enrichment": {
         "display_name": "Stores Enrichment Workers",
@@ -101,6 +106,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
             "TPV_INPUT_QUEUE", 
             "OUTPUT_QUEUE",
         ],
+        "scalable": False,
     },
     "tpv": {
         "display_name": "TPV Aggregation Workers",
@@ -114,6 +120,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
             "OUTPUT_QUEUE": "tpv_results",
         },
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
+        "scalable": False,
     },
     "items_top": {
         "display_name": "Top Items Workers",
@@ -132,6 +139,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
             "MENU_ITEMS_INPUT_QUEUE",
             "OUTPUT_QUEUE",
         ],
+        "scalable": False,
     },
     "top_clients": {
         "display_name": "Top Clients Workers",
@@ -152,6 +160,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
             "STORES_QUEUE",
             "OUTPUT_QUEUE",
         ],
+        "scalable": False,
     },
     "results": {
         "display_name": "Results Workers",
@@ -165,6 +174,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
             "OUTPUT_QUEUE": "gateway_results",
         },
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
+        "scalable": False,
     },
 }
 
@@ -329,6 +339,12 @@ def parse_args() -> argparse.Namespace:
         default=Path("docker-compose.yml"),
         help="Path where the generated docker-compose file will be written",
     )
+    parser.add_argument(
+        "--scale",
+        type=int,
+        default=None,
+        help="Override every worker group count with this value",
+    )
     return parser.parse_args()
 
 
@@ -351,6 +367,76 @@ def ensure_int(value: object, context: str, allow_zero: bool = True) -> int:
         comparator = "> 0" if not allow_zero else ">= 0"
         raise SystemExit(f"{context} must be {comparator} (got {value})")
     return value
+
+
+def _override_group_count(
+    worker_key: str,
+    group_index: int,
+    group_raw: object,
+    target_count: int,
+) -> Dict[str, object]:
+    if not isinstance(group_raw, dict):
+        raise SystemExit(
+            f"Worker '{worker_key}' group #{group_index} must be an object to apply scaling"
+        )
+
+    updated_group = dict(group_raw)
+    updated_group["count"] = target_count
+    return updated_group
+
+
+def apply_uniform_scale(config: Dict[str, object], raw_scale: Optional[int]) -> None:
+    if raw_scale is None:
+        return
+
+    scale_value = ensure_int(raw_scale, "'--scale' value", allow_zero=False)
+
+    workers_section = config.get("workers")
+    if not isinstance(workers_section, dict):
+        raise SystemExit("Config file must contain a 'workers' object to apply scaling")
+
+    for worker_key, worker_cfg in list(workers_section.items()):
+        meta = WORKER_DEFINITIONS.get(worker_key)
+        if meta is not None and not meta.get("scalable", False):
+            continue
+
+        if isinstance(worker_cfg, int):
+            workers_section[worker_key] = scale_value
+            continue
+
+        if isinstance(worker_cfg, list):
+            workers_section[worker_key] = [
+                _override_group_count(worker_key, index, group_cfg, scale_value)
+                for index, group_cfg in enumerate(worker_cfg, start=1)
+            ]
+            continue
+
+        if isinstance(worker_cfg, dict):
+            updated_worker = dict(worker_cfg)
+
+            # Update default count if present (used when no groups defined).
+            if "count" in updated_worker and not isinstance(updated_worker["count"], (list, dict)):
+                updated_worker["count"] = scale_value
+
+            groups_cfg = updated_worker.get("groups")
+            if groups_cfg is None:
+                updated_worker["count"] = scale_value
+            else:
+                if not isinstance(groups_cfg, list):
+                    raise SystemExit(
+                        f"Worker '{worker_key}' groups configuration must be a list to apply scaling"
+                    )
+                updated_worker["groups"] = [
+                    _override_group_count(worker_key, index, group_cfg, scale_value)
+                    for index, group_cfg in enumerate(groups_cfg, start=1)
+                ]
+
+            workers_section[worker_key] = updated_worker
+            continue
+
+        raise SystemExit(
+            f"Worker '{worker_key}' configuration type {type(worker_cfg).__name__} is not supported for scaling"
+        )
 
 
 def merge_worker_environment(
@@ -642,6 +728,7 @@ def write_output(path: Path, content: str) -> None:
 def main() -> None:
     args = parse_args()
     config = read_config(args.config)
+    apply_uniform_scale(config, args.scale)
     content = generate_compose(config)
     write_output(args.output, content)
     print(f"Generated {args.output} from {args.config}")
