@@ -84,29 +84,11 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "default_prefetch": 20,
         "default_environment": {
             "INPUT_QUEUE": "transactions_year_for_top_clients",
-            "OUTPUT_QUEUE": "transactions_compact",
+            "STORES_QUEUE": "stores_raw",
+            "OUTPUT_QUEUE": "transactions_final_results",
         },
-        "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
+        "required_environment": ["INPUT_QUEUE", "STORES_QUEUE", "OUTPUT_QUEUE"],
         "scalable": True,
-    },
-    "stores_enrichment": {
-        "display_name": "Stores Enrichment Workers",
-        "base_service_name": "stores-enrichment-worker",
-        "command": ["python", "stores_enrichment_worker.py"],
-        "needs_worker_id": False,
-        "supports_prefetch": True,
-        "default_prefetch": 20,
-        "default_environment": {
-            "STORES_INPUT_QUEUE": "stores_raw",
-            "TPV_INPUT_QUEUE": "tpv_results",
-            "OUTPUT_QUEUE": "transactions_final_results"
-        },
-        "required_environment": [
-            "STORES_INPUT_QUEUE",
-            "TPV_INPUT_QUEUE", 
-            "OUTPUT_QUEUE",
-        ],
-        "scalable": False,
     },
     "tpv": {
         "display_name": "TPV Aggregation Workers",
@@ -117,9 +99,10 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "default_prefetch": 20,
         "default_environment": {
             "INPUT_QUEUE": "transactions_time_filtered_tpv",
-            "OUTPUT_QUEUE": "tpv_results",
+            "STORES_QUEUE": "stores_raw",
+            "OUTPUT_QUEUE": "transactions_final_results",
         },
-        "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
+        "required_environment": ["INPUT_QUEUE", "STORES_QUEUE", "OUTPUT_QUEUE"],
         "scalable": False,
     },
     "items_top": {
@@ -183,7 +166,7 @@ SERVICE_ENV_DEFAULTS: Dict[str, Dict[str, str]] = {
         "RABBITMQ_HOST": "rabbitmq",
         "RABBITMQ_PORT": "5672",
         "OUTPUT_QUEUE": WORKER_DEFINITIONS["year_filter"]["default_environment"]["INPUT_QUEUE"],
-        "STORES_QUEUE": WORKER_DEFINITIONS["stores_enrichment"]["default_environment"]["STORES_INPUT_QUEUE"],
+        "STORES_QUEUE": "stores_raw",
         "STORES_QUEUES": "stores_raw,stores_for_top_clients",
         "USERS_QUEUE": WORKER_DEFINITIONS["top_clients"]["default_environment"]["USERS_QUEUE"],
         "TRANSACTION_ITEMS_QUEUE": WORKER_DEFINITIONS["items_top"]["default_environment"]["ITEMS_INPUT_QUEUE"],

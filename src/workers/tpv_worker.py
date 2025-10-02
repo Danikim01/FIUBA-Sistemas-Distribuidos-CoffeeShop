@@ -6,7 +6,7 @@ import logging
 import signal
 from datetime import datetime
 from collections import defaultdict
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
 
@@ -24,7 +24,7 @@ def _semester_from_month(month: int) -> str:
 
 
 class TPVWorker:
-    """Calcula el TPV por semestre y sucursal usando el monto final."""
+    """Calcula el TPV por semestre y sucursal usando el monto final y enriquece con store names."""
 
     def __init__(self) -> None:
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
@@ -35,7 +35,8 @@ class TPVWorker:
         signal.signal(signal.SIGTERM, self._handle_sigterm)
 
         self.input_queue = os.getenv('INPUT_QUEUE', 'transactions_time_filtered_tpv')
-        self.output_queue = os.getenv('OUTPUT_QUEUE', 'tpv_results')
+        self.stores_queue = os.getenv('STORES_QUEUE', 'stores_raw')
+        self.output_queue = os.getenv('OUTPUT_QUEUE', 'transactions_final_results')
 
         self.prefetch_count = int(os.getenv('PREFETCH_COUNT', 10))
 
@@ -46,18 +47,30 @@ class TPVWorker:
             prefetch_count=self.prefetch_count,
         )
 
+        self.stores_middleware = RabbitMQMiddlewareQueue(
+            host=self.rabbitmq_host,
+            queue_name=self.stores_queue,
+            port=self.rabbitmq_port,
+            prefetch_count=self.prefetch_count,
+        )
+
         self.output_middleware = RabbitMQMiddlewareQueue(
             host=self.rabbitmq_host,
             queue_name=self.output_queue,
             port=self.rabbitmq_port,
         )
 
+        # Lookup table para stores
+        self.stores_lookup: Dict[int, str] = {}
+        self.stores_loaded = False
+
         # Estructura: {(store_id, year, semester) -> total}
         self._totals: Dict[Tuple[int, int, str], float] = defaultdict(float)
 
         logger.info(
-            "TPVWorker inicializado - Input: %s, Output: %s",
+            "TPVWorker inicializado - Input: %s, Stores: %s, Output: %s",
             self.input_queue,
+            self.stores_queue,
             self.output_queue,
         )
 
@@ -65,13 +78,52 @@ class TPVWorker:
         """Maneja la señal SIGTERM para terminar ordenadamente"""
         logger.info("SIGTERM recibido, iniciando shutdown ordenado...")
         self.input_middleware.stop_consuming()
+        self.stores_middleware.stop_consuming()
         self.shutdown_requested = True
+
+    def process_stores_batch(self, batch: List[Dict[str, Any]]) -> None:
+        """Procesa un lote de stores y construye el lookup table"""
+        for store in batch:
+            try:
+                store_id = int(float(store.get('store_id')))
+                store_name = store.get('store_name', '')
+                self.stores_lookup[store_id] = store_name
+            except (TypeError, ValueError):
+                logger.debug("Store invalida omitida: %s", store)
+
+    def _consume_stores(self) -> None:
+        """Carga todos los stores para construir el lookup table"""
+        logger.info("Cargando metadata de stores")
+
+        def on_message(message: Any) -> None:
+            if self.shutdown_requested:
+                logger.info("Shutdown solicitado, deteniendo carga de stores")
+                self.stores_middleware.stop_consuming()
+                return
+
+            if _is_eof(message):
+                self.stores_loaded = True
+                self.stores_middleware.stop_consuming()
+                return
+
+            if isinstance(message, list):
+                self.process_stores_batch(message)
+            else:
+                self.process_stores_batch([message])
+
+        try:
+            self.stores_middleware.start_consuming(on_message)
+        except KeyboardInterrupt:
+            logger.info("Carga de stores interrumpida")
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Error cargando stores: %s", exc)
+        finally:
+            logger.info("Stores procesados: %s", len(self.stores_lookup))
 
     def _update_totals(self, transaction: Dict[str, Any]) -> None:
         try:
             created_at = transaction.get('created_at')
             store_id_raw = transaction.get('store_id')
-            store_name = transaction.get('store_name')
             final_amount_raw = transaction.get('final_amount')
 
             if not created_at or store_id_raw is None or final_amount_raw is None:
@@ -82,6 +134,9 @@ class TPVWorker:
             store_id = int(store_id_raw)
             final_amount = float(final_amount_raw)
             semester = _semester_from_month(dt.month)
+
+            # Obtener store_name del lookup
+            store_name = self.stores_lookup.get(store_id, '')
 
             key = (store_id, store_name, dt.year, semester)
             self._totals[key] += final_amount
@@ -137,29 +192,33 @@ class TPVWorker:
             logger.error('Error enviando mensaje desde TPVWorker: %s', exc)
 
     def start_consuming(self) -> None:
-        logger.info('TPVWorker consumiendo transacciones filtradas por tiempo')
-
-        def on_message(message: Any) -> None:
-            try:
-                if self.shutdown_requested:
-                    logger.info("Shutdown requested, stopping message processing")
-                    return
-                    
-                if _is_eof(message):
-                    self._emit_summary()
-                    self._send_payload({'type': 'EOF', 'source': 'tpv'})
-                    self.input_middleware.stop_consuming()
-                    return
-
-                if isinstance(message, list):
-                    self._process_batch(message)
-                else:
-                    self._process_transaction(message)
-
-            except Exception as exc:  # noqa: BLE001
-                logger.error('Error en callback TPVWorker: %s', exc)
-
         try:
+            # Primero cargar stores
+            self._consume_stores()
+            
+            # Luego procesar transacciones
+            logger.info('TPVWorker consumiendo transacciones filtradas por tiempo')
+
+            def on_message(message: Any) -> None:
+                try:
+                    if self.shutdown_requested:
+                        logger.info("Shutdown requested, stopping message processing")
+                        return
+                        
+                    if _is_eof(message):
+                        self._emit_summary()
+                        self._send_payload({'type': 'EOF', 'source': 'tpv'})
+                        self.input_middleware.stop_consuming()
+                        return
+
+                    if isinstance(message, list):
+                        self._process_batch(message)
+                    else:
+                        self._process_transaction(message)
+
+                except Exception as exc:  # noqa: BLE001
+                    logger.error('Error en callback TPVWorker: %s', exc)
+
             self.input_middleware.start_consuming(on_message)
         except KeyboardInterrupt:
             logger.info('TPVWorker interrumpido por el usuario')
@@ -172,7 +231,10 @@ class TPVWorker:
         try:
             self.input_middleware.close()
         finally:
-            self.output_middleware.close()
+            try:
+                self.stores_middleware.close()
+            finally:
+                self.output_middleware.close()
 
 
 def main() -> None:
