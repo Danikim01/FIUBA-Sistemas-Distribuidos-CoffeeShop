@@ -5,10 +5,10 @@ Cubre todos los escenarios requeridos por la cátedra.
 """
 
 import pytest
-import time
 import threading
 import os
 import warnings
+import time
 from middleware import (
     RabbitMQMiddlewareQueue, 
     RabbitMQMiddlewareExchange,
@@ -30,6 +30,13 @@ class TestRabbitMQMiddleware:
         self.rabbitmq_port = int(os.getenv('RABBITMQ_PORT', '5672'))
         
         # Limpiar colas y exchanges antes de cada prueba
+        self._cleanup_queues_and_exchanges()
+    
+    @pytest.fixture(autouse=True)
+    def teardown(self):
+        """Limpieza después de cada prueba."""
+        yield
+        # Limpiar colas y exchanges después de cada prueba
         self._cleanup_queues_and_exchanges()
     
     def _cleanup_queues_and_exchanges(self):
@@ -71,8 +78,8 @@ class TestWorkingQueue1To1(TestRabbitMQMiddleware):
     def test_queue_1to1_basic_communication(self):
         """Prueba comunicación básica 1 a 1 por cola."""
         # Crear middleware para producer y consumer
-        producer = RabbitMQMiddlewareQueue(self.rabbitmq_host, "test_queue_1to1")
-        consumer = RabbitMQMiddlewareQueue(self.rabbitmq_host, "test_queue_1to1")
+        producer = RabbitMQMiddlewareQueue(self.rabbitmq_host, "test_queue_1to1", prefetch_count=1)
+        consumer = RabbitMQMiddlewareQueue(self.rabbitmq_host, "test_queue_1to1", prefetch_count=1)
         
         # Lista para almacenar mensajes recibidos
         received_messages = []
@@ -88,18 +95,22 @@ class TestWorkingQueue1To1(TestRabbitMQMiddleware):
             consumer_thread.daemon = True
             consumer_thread.start()
             
+            # Esperar a que el consumer esté listo
+            time.sleep(0.5)
             
             # Enviar mensajes
             test_messages = [
-                {"id": 1, "content": "Mensaje 1", "timestamp": time.time()},
-                {"id": 2, "content": "Mensaje 2", "timestamp": time.time()},
-                {"id": 3, "content": "Mensaje 3", "timestamp": time.time()}
+                {"id": 1, "content": "Mensaje 1"},
+                {"id": 2, "content": "Mensaje 2"},
+                {"id": 3, "content": "Mensaje 3"}
             ]
             
             for msg in test_messages:
                 producer.send(msg)
             
-            
+            # Esperar un poco más para que se procesen todos los mensajes
+            time.sleep(1.0)
+        
             # Detener consumer
             consumer.stop_consuming()
             consumer_thread.join(timeout=5)
@@ -118,8 +129,8 @@ class TestWorkingQueue1To1(TestRabbitMQMiddleware):
     
     def test_queue_1to1_message_ordering(self):
         """Prueba que los mensajes se reciben en orden."""
-        producer = RabbitMQMiddlewareQueue(self.rabbitmq_host, "test_queue_1to1")
-        consumer = RabbitMQMiddlewareQueue(self.rabbitmq_host, "test_queue_1to1")
+        producer = RabbitMQMiddlewareQueue(self.rabbitmq_host, "test_queue_1to1", prefetch_count=1)
+        consumer = RabbitMQMiddlewareQueue(self.rabbitmq_host, "test_queue_1to1", prefetch_count=1)
         
         received_messages = []
         
@@ -133,11 +144,16 @@ class TestWorkingQueue1To1(TestRabbitMQMiddleware):
             consumer_thread.daemon = True
             consumer_thread.start()
             
+            # Esperar a que el consumer esté listo
+            time.sleep(0.5)
+            
             # Enviar mensajes numerados
             for i in range(10):
                 producer.send({"order": i, "content": f"Mensaje {i}"})
+            
+            # Esperar a que se procesen todos los mensajes
+            time.sleep(1.0)
 
-             
             consumer.stop_consuming()
             consumer_thread.join(timeout=5)
             
@@ -190,12 +206,18 @@ class TestWorkingQueue1ToN(TestRabbitMQMiddleware):
             for thread in [consumer1_thread, consumer2_thread, consumer3_thread]:
                 thread.daemon = True
                 thread.start()
-            
+
+            # Esperar a que los consumers estén listos
+            time.sleep(1.0)
+
             # Enviar mensajes
             total_messages = 15
             for i in range(total_messages):
                 producer.send({"id": i, "content": f"Mensaje {i}"})
             
+            # Esperar a que se procesen todos los mensajes
+            time.sleep(2.0)
+
             # Detener consumers
             for consumer in [consumer1, consumer2, consumer3]:
                 consumer.stop_consuming()
@@ -243,18 +265,20 @@ class TestExchange1To1(TestRabbitMQMiddleware):
             consumer_thread.start()
             
             # Esperar a que el consumer se configure (necesario para Exchanges)
-            time.sleep(1)
+            time.sleep(1.0)
             
             # Enviar mensajes
             test_messages = [
-                {"id": 1, "content": "Mensaje Exchange 1", "timestamp": time.time()},
-                {"id": 2, "content": "Mensaje Exchange 2", "timestamp": time.time()},
-                {"id": 3, "content": "Mensaje Exchange 3", "timestamp": time.time()}
+                {"id": 1, "content": "Mensaje Exchange 1"},
+                {"id": 2, "content": "Mensaje Exchange 2"},
+                {"id": 3, "content": "Mensaje Exchange 3"}
             ]
             
             for msg in test_messages:
                 producer.send(msg, "route1")
-                time.sleep(0.5)  # Delay entre envíos para Exchanges
+            
+            # Esperar a que se procesen los mensajes
+            time.sleep(1.0)
             
             consumer.stop_consuming()
             consumer_thread.join(timeout=5)
@@ -289,13 +313,15 @@ class TestExchange1To1(TestRabbitMQMiddleware):
             consumer_thread.start()
             
             # Esperar a que el consumer se configure (necesario para Exchanges)
-            time.sleep(1)
+            time.sleep(1.0)
             
             # Enviar mensajes a diferentes routing keys
             producer.send({"id": 1, "content": "Para route1"}, "route1")
             producer.send({"id": 2, "content": "Para route2"}, "route2")  # No debería recibirse
             producer.send({"id": 3, "content": "Para route1 otra vez"}, "route1")
-            time.sleep(1)  # Esperar a que se procese el último mensaje
+            
+            # Esperar a que se procesen los mensajes
+            time.sleep(1.0)
             
             consumer.stop_consuming()
             consumer_thread.join(timeout=5)
@@ -351,7 +377,7 @@ class TestExchange1ToN(TestRabbitMQMiddleware):
                 thread.start()
             
             # Esperar a que los consumers se configuren (necesario para Exchanges)
-            time.sleep(2)
+            time.sleep(1.5)
             
             # Enviar mensajes a diferentes routing keys
             messages_route1 = [
@@ -367,12 +393,13 @@ class TestExchange1ToN(TestRabbitMQMiddleware):
             # Enviar mensajes a route1
             for msg in messages_route1:
                 producer.send(msg, "route1")
-                time.sleep(0.3)
             
             # Enviar mensajes a route2
             for msg in messages_route2:
                 producer.send(msg, "route2")
-                time.sleep(0.3)
+            
+            # Esperar a que se procesen todos los mensajes
+            time.sleep(2.0)
                     
             # Detener consumers
             for consumer in [consumer1, consumer2, consumer3]:
