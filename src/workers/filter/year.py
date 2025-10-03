@@ -17,9 +17,11 @@ class YearFilterWorker(FilterWorker):
     Worker que filtra transacciones por año (2024 y 2025).
     Recibe transacciones y las filtra según el año en created_at.
     """
-    
-    def _initialize_worker(self):
+
+    def __init__(self):
         """Initialize worker-specific configuration."""
+        super().__init__()
+
         min_year = int(os.getenv('MIN_YEAR', '2024'))
         max_year = int(os.getenv('MAX_YEAR', '2025'))
 

@@ -11,8 +11,7 @@ logger = logging.getLogger(__name__)
 
 def run_main(worker_class, *args, **kwargs):
     try:
-        config = WorkerConfig()
-        worker = worker_class(config, *args, **kwargs)
+        worker = worker_class(*args, **kwargs)
         worker.start_consuming()
     except Exception as e:
         logger.error(f"Error in main: {e}")

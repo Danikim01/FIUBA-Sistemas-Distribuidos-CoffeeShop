@@ -20,9 +20,10 @@ class AmountFilterWorker(FilterWorker):
     Worker that filters transactions by amount (>= 75).
     Receives time-filtered transactions and filters them by amount.
     """
-    
-    def _initialize_worker(self):
+
+    def __init__(self):
         """Initialize worker-specific configuration."""
+        super().__init__()
         self.min_amount = safe_float_conversion(os.getenv('MIN_AMOUNT', '75.0'))
         logger.info(f"AmountFilterWorker configured with min_amount: {self.min_amount}")
     

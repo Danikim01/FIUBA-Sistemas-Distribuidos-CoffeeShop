@@ -90,7 +90,6 @@ class ResultsHandler:
             with file_path.open("a", encoding="utf-8") as file_handle:
                 for line in body_lines:
                     file_handle.write(f"{line}\n")
-                file_handle.write("\n")
             logger.info("Resultados escritos en %s", file_path)
         except Exception as exc:  # noqa: BLE001
             logger.error("No se pudieron escribir resultados en %s: %s", file_path, exc)
@@ -109,13 +108,8 @@ class ResultsHandler:
             transactions = []
 
         total = len(transactions)
-
         body_lines: List[str] = []
-        if not transactions:
-            body_lines.append("Sin transacciones que cumplan las condiciones.")
-            body_lines.append("-" * 50)
-        else:
-            for transaction in transactions:
+        for transaction in transactions:
                 transaction_id = transaction.get("transaction_id", "desconocido")
                 final_amount_raw = transaction.get("final_amount")
                 try:
@@ -124,7 +118,6 @@ class ResultsHandler:
                 except (TypeError, ValueError):
                     amount_str = "0.00"
                 body_lines.append(f"{transaction_id} - {amount_str}")
-            body_lines.append("-" * 50)
 
         self._append_to_file("amount_filter_transactions.txt", body_lines, client_id)
         self.results_received += total

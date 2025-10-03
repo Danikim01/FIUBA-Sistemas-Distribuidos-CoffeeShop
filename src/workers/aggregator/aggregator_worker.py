@@ -10,7 +10,7 @@ from message_utils import is_eof_message
 logger = logging.getLogger(__name__)
 
 
-class MultiSourceWorker(BaseWorker):
+class AggregatorWorker(BaseWorker):
     """Base class for workers that consume from multiple input sources."""
     
     def __init__(self, config: WorkerConfig, additional_queues: Dict[str, str]):

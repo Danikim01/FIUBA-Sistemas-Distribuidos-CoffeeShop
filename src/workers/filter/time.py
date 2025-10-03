@@ -19,8 +19,10 @@ class TimeFilterWorker(FilterWorker):
     Receives year-filtered transactions and filters them by time.
     """
     
-    def _initialize_worker(self):
+    def __init__(self):
         """Initialize worker-specific configuration."""
+        super().__init__()
+
         start_hour = int(os.getenv('START_HOUR', '6'))
         end_hour = int(os.getenv('END_HOUR', '23'))
         

@@ -23,12 +23,11 @@ class BaseWorker(ABC):
     Handles middleware setup, signal handling, and message processing patterns.
     """
     
-    def __init__(self, config: WorkerConfig):
+    def __init__(self):
         """Initialize base worker.
-        
-        Args:
-            config: Worker configuration instance
         """
+        config = WorkerConfig()
+
         self.config = config
         self.shutdown_requested = False
         self.current_client_id = ''  # Track current client being processed
@@ -62,18 +61,12 @@ class BaseWorker(ABC):
         else:
             self.output_middleware = None
         
-        self._initialize_worker()
-        
         logger.info(
             "%s initialized - Input: %s, Output: %s",
             self.__class__.__name__,
             config.input_queue,
             config.get_output_target()
         )
-    
-    def _initialize_worker(self):
-        """Hook for subclasses to perform additional initialization."""
-        pass
     
     def _handle_sigterm(self, signum, frame):
         """Handle SIGTERM signal for graceful shutdown.
