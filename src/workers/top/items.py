@@ -1,282 +1,180 @@
 #!/usr/bin/env python3
 
-import os
-import sys
-import logging
-from collections import defaultdict
-from datetime import datetime, time
-from typing import Any, Dict, List, Tuple
-import signal
-import threading
+"""Top items worker that aggregates per-month best sellers and profits."""
 
-from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
+import logging
+import os
+from collections import defaultdict
+from datetime import datetime
+from typing import Any, DefaultDict, Dict
+
+try:
+    from workers.worker_utils import (  # type: ignore
+        run_main,
+        safe_float_conversion,
+        safe_int_conversion,
+    )
+except ImportError:  # pragma: no cover - legacy fallback
+    from worker_utils import (  # type: ignore
+        run_main,
+        safe_float_conversion,
+        safe_int_conversion,
+    )
+
+from workers.top.top_worker import TopWorker
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def _is_eof(message: Any) -> bool:
-    return isinstance(message, dict) and str(message.get('type', '')).upper() == 'EOF'
-
-
-class ItemsTopWorker:
-    """Calcula el top de ítems por mes según cantidad y beneficio."""
+class TopItemsWorker(TopWorker):
+    """Computes best-selling and most profitable items per month."""
 
     def __init__(self) -> None:
-        self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
-        self.rabbitmq_port = int(os.getenv('RABBITMQ_PORT', 5672))
-        self.shutdown_requested = False
-        
-        # Configurar manejo de SIGTERM
-        signal.signal(signal.SIGTERM, self._handle_sigterm)
-        
-        self.items_input_queue = os.getenv('ITEMS_INPUT_QUEUE', 'transaction_items_raw')
-        self.menu_items_input_queue = os.getenv('MENU_ITEMS_INPUT_QUEUE', 'menu_items_raw')
-        self.output_queue = os.getenv('OUTPUT_QUEUE', 'transactions_final_results')
+        super().__init__()
+        self.top_per_month = safe_int_conversion(os.getenv('TOP_ITEMS_COUNT', '1')) or 1
+        self._quantity_totals: DefaultDict[
+            str, DefaultDict[str, DefaultDict[int, int]]
+        ] = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+        self._profit_totals: DefaultDict[
+            str, DefaultDict[str, DefaultDict[int, float]]
+        ] = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
 
-        self.prefetch_count = int(os.getenv('PREFETCH_COUNT', 10))
+        logger.info("TopItemsWorker configured with top_per_month=%s", self.top_per_month)
 
-        self.items_middleware = RabbitMQMiddlewareQueue(
-            host=self.rabbitmq_host,
-            queue_name=self.items_input_queue,
-            port=self.rabbitmq_port,
-            prefetch_count=self.prefetch_count,
-        )
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
-        self.menu_items_middleware = RabbitMQMiddlewareQueue(
-            host=self.rabbitmq_host,
-            queue_name=self.menu_items_input_queue,
-            port=self.rabbitmq_port,
-            prefetch_count=self.prefetch_count,
-        )
-
-        self.output_middleware = RabbitMQMiddlewareQueue(
-            host=self.rabbitmq_host,
-            queue_name=self.output_queue,
-            port=self.rabbitmq_port,
-        )
-
-        self.allowed_years = {2024, 2025}
-        self.start_time = time(6, 0)
-        self.end_time = time(23, 0)
-
-        self.menu_items_lookup: Dict[int, str] = {}
-        self.quantity_totals: defaultdict[Tuple[str, int], int] = defaultdict(int)
-        self.profit_totals: defaultdict[Tuple[str, int], float] = defaultdict(float)
-
-        self.menu_items_eof_received = False
-        self.items_eof_received = False
-        self.results_emitted = False
-
-
-        logger.info(
-            "ItemsTopWorker inicializado - Items: %s, MenuItems: %s, Output: %s",
-            self.items_input_queue,
-            self.menu_items_input_queue,
-            self.output_queue,
-        )
-
-    def _handle_sigterm(self, signum, frame):
-        """Maneja la señal SIGTERM para terminar ordenadamente"""
-        logger.info("SIGTERM recibido, iniciando shutdown ordenado...")
-        self.menu_items_middleware.stop_consuming()
-        self.items_middleware.stop_consuming()
-        self.shutdown_requested = True
-
-
-    def _parse_datetime(self, value: str) -> datetime | None:
-        try:
-            return datetime.strptime(value, '%Y-%m-%d %H:%M:%S')
-        except (TypeError, ValueError):
+    @staticmethod
+    def _extract_year_month(created_at: Any) -> str | None:
+        if not created_at:
             return None
 
-    def _should_include(self, created_at: str) -> Tuple[str, datetime] | None:
-        dt = self._parse_datetime(created_at)
-        if not dt:
-            return None
-
-        if dt.year not in self.allowed_years:
-            return None
-
-        if not (self.start_time <= dt.time() <= self.end_time):
-            return None
-
-        return dt.strftime('%Y-%m'), dt
-
-    def _update_metrics(self, item: Dict[str, Any]) -> None:
-        created_at = item.get('created_at')
-        result = self._should_include(created_at)
-        if not result:
-            return
-
-        year_month, _ = result
-
-        try:
-            item_id = int(float(item.get('item_id')))
-        except (TypeError, ValueError):
-            logger.debug("Item sin item_id válido: %s", item)
-            return
-
-        try:
-            subtotal = float(item.get('subtotal', 0.0))
-        except (TypeError, ValueError):
-            subtotal = 0.0
-
-        key = (year_month, item_id)
-        self.quantity_totals[key] += 1
-        self.profit_totals[key] += subtotal
-
-    def process_menu_items_batch(self, batch: List[Dict[str, Any]]) -> None:
-        for entry in batch:
+        if isinstance(created_at, str):
             try:
-                item_id = int(entry.get('item_id'))
-                item_name = entry.get('item_name', '') or ''
-                self.menu_items_lookup[item_id] = item_name
-            except (TypeError, ValueError):
-                logger.debug("Menu item inválido: %s", entry)
+                dt = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                return created_at[:7] if len(created_at) >= 7 else None
+        else:
+            try:
+                dt = datetime.fromisoformat(str(created_at))
+            except ValueError:
+                return None
 
-    def process_items_batch(self, batch: List[Dict[str, Any]]) -> None:
-        for item in batch:
-            self._update_metrics(item)
+        return dt.strftime('%Y-%m')
 
-    def _build_top_results(
-        self,
-        primary_map: Dict[Tuple[str, int], float | int],
-        metric_key: str,
-        secondary_map: Dict[Tuple[str, int], float | int],
-    ) -> List[Dict[str, Any]]:
-        results: List[Dict[str, Any]] = []
-        months = sorted({month for month, _ in primary_map.keys()})
+    def _accumulate_transaction(self, client_id: str, payload: Dict[str, Any]) -> None:
+        year_month = self._extract_year_month(payload.get('created_at'))
+        if not year_month:
+            return
 
-        for month in months:
-            entries: List[Tuple[int, float | int, float | int]] = []
-            for (year_month, item_id), value in primary_map.items():
-                if year_month != month:
-                    continue
-                secondary_value = secondary_map.get((year_month, item_id), 0)
-                entries.append((item_id, value, secondary_value))
+        try:
+            item_id = safe_int_conversion(payload.get('item_id'))
+        except Exception:  # noqa: BLE001
+            logger.debug("Transaction item without valid item_id: %s", payload)
+            return
 
-            if not entries:
-                continue
+        if item_id <= 0:
+            return
 
-            entries.sort(key=lambda data: (data[1], data[2], -data[0]), reverse=True)
-            item_id, primary_value, _ = entries[0]
-            item_name = self.menu_items_lookup.get(item_id, f"Item {item_id}")
+        quantity = safe_int_conversion(payload.get('quantity'), 0)
+        subtotal = safe_float_conversion(payload.get('subtotal'), 0.0)
 
-            results.append(
-                {
-                    'year_month_created_at': month,
-                    'item_id': item_id,
-                    'item_name': item_name,
-                    metric_key: primary_value,
-                }
+        if quantity < 0:
+            quantity = 0
+
+        qty_bucket = self._quantity_totals[client_id][year_month]
+        qty_bucket[item_id] += quantity
+
+        profit_bucket = self._profit_totals[client_id][year_month]
+        profit_bucket[item_id] += subtotal
+
+    # ------------------------------------------------------------------
+    # BaseWorker overrides
+    # ------------------------------------------------------------------
+
+    def process_message(self, message: Any):
+        if not isinstance(message, dict):
+            logger.debug("Ignoring non-dict payload: %s", type(message))
+            return
+
+        client_id = self.current_client_id or ''
+        if not client_id:
+            logger.warning("Transaction received without client metadata")
+            return
+
+        self._accumulate_transaction(client_id, message)
+
+    def process_batch(self, batch: Any):
+        client_id = self.current_client_id or ''
+        if not client_id:
+            logger.warning("Batch received without client metadata")
+            return
+
+        for entry in batch:
+            if isinstance(entry, dict):
+                self._accumulate_transaction(client_id, entry)
+
+    # ------------------------------------------------------------------
+    # Result emission
+    # ------------------------------------------------------------------
+
+    def _build_results(self, totals: Dict[str, Dict[int, float]], metric_key: str) -> list[Dict[str, Any]]:
+        results: list[Dict[str, Any]] = []
+        for year_month, items_map in totals.items():
+            ranked = sorted(items_map.items(), key=lambda item: (-item[1], item[0]))
+            for item_id, value in ranked[: self.top_per_month]:
+                results.append(
+                    {
+                        'year_month_created_at': year_month,
+                        'item_id': item_id,
+                        metric_key: value,
+                    }
+                )
+
+        results.sort(
+            key=lambda row: (
+                row['year_month_created_at'],
+                -row[metric_key],
+                row['item_id'],
             )
-
+        )
         return results
 
-    def _emit_results(self) -> None:
-        if self.results_emitted:
+    def handle_eof(self, message: Dict[str, Any]):
+        client_id = message.get('client_id') or self.current_client_id
+        if not client_id:
+            logger.warning("EOF received without client_id in TopItemsWorker")
             return
 
-        quantity_results = self._build_top_results(
-            self.quantity_totals,
-            'sellings_qty',
-            self.profit_totals,
-        )
-        profit_results = self._build_top_results(
-            self.profit_totals,
-            'profit_sum',
-            self.quantity_totals,
-        )
+        quantity_totals = self._quantity_totals.pop(client_id, {})
+        profit_totals = self._profit_totals.pop(client_id, {})
 
-        payload_quantity = {
-            'type': 'top_items_by_quantity',
-            'results': quantity_results,
-        }
-        payload_profit = {
-            'type': 'top_items_by_profit',
-            'results': profit_results,
+        quantity_results = self._build_results(quantity_totals, 'sellings_qty')
+        profit_results = self._build_results(profit_totals, 'profit_sum')
+
+        payload = {
+            'type': 'top_items_partial',
+            'quantity': quantity_results,
+            'profit': profit_results,
         }
 
-        try:
-            self.output_middleware.send(payload_quantity)
-            self.output_middleware.send(payload_profit)
-        finally:
-            self.results_emitted = True
+        self.send_message(payload, client_id=client_id)
+        logger.info(
+            "TopItemsWorker emitted %s quantity rows and %s profit rows for client %s",
+            len(quantity_results),
+            len(profit_results),
+            client_id,
+        )
 
-    def _finalize_if_ready(self) -> None:
-        if self.menu_items_eof_received and self.items_eof_received:
-            self._emit_results()
-            try:
-                self.output_middleware.send({'type': 'EOF', 'source': 'items_top'})
-            finally:
-                self.items_middleware.stop_consuming()
-
-    def start_consuming(self) -> None:
-        logger.info("ItemsTopWorker iniciando consumo")
-
-        def on_menu_items(message: Any) -> None:
-            if self.shutdown_requested:
-                logger.info("Shutdown requested, stopping menu items processing")
-                return
-                
-            if _is_eof(message):
-                self.menu_items_eof_received = True
-                self.menu_items_middleware.stop_consuming()
-                return
-
-            if isinstance(message, list):
-                self.process_menu_items_batch(message)
-            else:
-                self.process_menu_items_batch([message])
-
-        def on_items(message: Any) -> None:
-            if self.shutdown_requested:
-                logger.info("Shutdown requested, stopping items processing")
-                return
-                
-            if _is_eof(message):
-                self.items_eof_received = True
-                self._finalize_if_ready()
-                return
-
-            if isinstance(message, list):
-                self.process_items_batch(message)
-            else:
-                self.process_items_batch([message])
-
-        try:
-            self.menu_items_middleware.start_consuming(on_menu_items)
-            self.items_middleware.start_consuming(on_items)
-        except KeyboardInterrupt:
-            logger.info("ItemsTopWorker interrumpido")
-        except Exception as exc:
-            logger.error("Error en ItemsTopWorker: %s", exc)
-        finally:
-            self.cleanup()
-
-    def cleanup(self) -> None:
-        try:
-            if hasattr(self, 'menu_items_middleware') and self.menu_items_middleware:
-                self.menu_items_middleware.close()
-        except Exception as exc:
-            logger.debug("Error cerrando menu_items middleware: %s", exc)
-        finally:
-            try:
-                if hasattr(self, 'items_middleware') and self.items_middleware:
-                    self.items_middleware.close()
-            finally:
-                if hasattr(self, 'output_middleware') and self.output_middleware:
-                    self.output_middleware.close()
+        self.send_eof(client_id=client_id, additional_data={'source': 'top_items'})
+        self.reset_client(client_id)
 
 
 def main() -> None:
-    try:
-        worker = ItemsTopWorker()
-        worker.start_consuming()
-    except Exception as exc:
-        logger.error("Error fatal en ItemsTopWorker: %s", exc)
-        sys.exit(1)
+    run_main(TopItemsWorker)
 
 
 if __name__ == '__main__':

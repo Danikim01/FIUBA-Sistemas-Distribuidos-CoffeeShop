@@ -77,8 +77,8 @@
         {
           "count": 1,
           "environment": {
-            "INPUT_QUEUE": "transactions_time_filtered_tpv",
-            "OUTPUT_QUEUE": "transactions_final_results"
+            "INPUT_QUEUE": "transaction_time_filtered",
+            "OUTPUT_QUEUE": "tpv_partial"
           }
         }
       ]
@@ -89,9 +89,8 @@
         {
           "count": 1,
           "environment": {
-            "ITEMS_INPUT_QUEUE": "transaction_items_raw",
-            "MENU_ITEMS_INPUT_QUEUE": "menu_items_raw",
-            "OUTPUT_QUEUE": "transactions_final_results"
+            "INPUT_QUEUE": "transaction_items_raw",
+            "OUTPUT_QUEUE": "top_items_partial"
           }
         }
       ]
@@ -102,10 +101,8 @@
         {
           "count": 1,
           "environment": {
-            "TRANSACTIONS_QUEUE": "transactions_compact",
-            "USERS_QUEUE": "users_raw",
-            "STORES_QUEUE": "stores_for_top_clients",
-            "OUTPUT_QUEUE": "transactions_final_results"
+            "INPUT_QUEUE": "transactions_filtered_by_year",
+            "OUTPUT_QUEUE": "top_clients_partial"
           }
         }
       ]
