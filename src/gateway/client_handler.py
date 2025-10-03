@@ -61,7 +61,6 @@ class ClientHandler:
                                 True
                             )
                             
-                            # Check if all EOFs have been received for this client
                             if all_eof_received:
                                 logger.info(f"All EOFs received for client {client_id}, starting result forwarding")
                                 self._forward_results_to_client(client_socket, client_id)
@@ -107,46 +106,48 @@ class ClientHandler:
 
         def handle_payload(payload: Any) -> None:
             nonlocal eof_sent
+            
+            if (payload.get('client_id') != client_id):
+                return
+            
             if isinstance(payload, list):
                 for item in payload:
                     handle_payload(item)
                 return
 
-            # Check if this is an EOF message
             if self.message_handlers.is_eof_message(payload):
-                # Check if this EOF is for our specific client
-                if payload.get('client_id') == client_id:
-                    logger.info(f"Received EOF from results queue for client {client_id}; notifying client")
-                    try:
-                        self._send_json_line(client_socket, {'type': 'EOF'})
-                        eof_sent = True
-                    except Exception as exc:
-                        logger.error(f"Failed to send EOF to client {client_id}: {exc}")
-                    finally:
-                        results_queue.stop_consuming()
+                logger.info(f"Received EOF from results queue for client {client_id}; notifying client")
+                try:
+                    self._send_json_line(client_socket, {'type': 'EOF'})
+                    eof_sent = True
+                except Exception as exc:
+                    logger.error(f"Failed to send EOF to client {client_id}: {exc}")
+                finally:
+                    results_queue.stop_consuming()
                 return
 
-            # Check if this result is for our specific client
-            if isinstance(payload, dict) and payload.get('client_id') == client_id:
-                try:
-                    # Remove client_id from the payload before sending to client
-                    result_payload = {k: v for k, v in payload.items() if k != 'client_id'}
+            if not isinstance(payload, dict):
+                return
+            
+            try:
+                # Remove client_id from the payload before sending to client
+                result_payload = {k: v for k, v in payload.items() if k != 'client_id'}
 
-                    # If there's a nested 'data' section, merge its contents into the top-level payload
-                    # Así es como el cliente lo interpreta
-                    data_section = result_payload.get('data')
-                    if isinstance(data_section, dict):
-                        merged_payload = data_section.copy()
-                        for key, value in result_payload.items():
-                            if key != 'data' and key not in merged_payload:
-                                merged_payload[key] = value
-                        result_payload = merged_payload
+                # If there's a nested 'data' section, merge its contents into the top-level payload
+                # Así es como el cliente lo interpreta
+                data_section = result_payload.get('data')
+                if isinstance(data_section, dict):
+                    merged_payload = data_section.copy()
+                    for key, value in result_payload.items():
+                        if key != 'data' and key not in merged_payload:
+                            merged_payload[key] = value
+                    result_payload = merged_payload
 
-                    logger.info(f"Gateway sending result to client {client_id}: {result_payload}")
-                    self._send_json_line(client_socket, result_payload)
-                except Exception as exc:
-                    logger.error(f"Failed to forward result to client {client_id}: {exc}")
-                    results_queue.stop_consuming()
+                logger.info(f"Gateway sending result to client {client_id}: {result_payload}")
+                self._send_json_line(client_socket, result_payload)
+            except Exception as exc:
+                logger.error(f"Failed to forward result to client {client_id}: {exc}")
+                results_queue.stop_consuming()
 
         def on_message(message: Any) -> None:
             try:

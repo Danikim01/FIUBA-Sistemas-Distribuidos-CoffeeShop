@@ -91,9 +91,13 @@ class ResultsWorker(BaseWorker):
             return
 
         try:
-            self.send_message(payload)
+            self.send_message(payload, client_id=self.current_client_id)
             self.result_count += 1
-            logger.info("Resultado #%s reenviado: %s", self.result_count, getattr(payload, "get", lambda *_: "payload")("type", "payload"))
+            logger.info(
+                "Resultado #%s reenviado: %s",
+                self.result_count,
+                getattr(payload, "get", lambda *_: "payload")("type", "payload"),
+            )
         except Exception as exc:
             logger.error("Error procesando resultado: %s", exc)
 
@@ -101,13 +105,13 @@ class ResultsWorker(BaseWorker):
         """Procesa un lote de resultados (chunk) como un único payload."""
         self.process_message(batch)
 
-    def _emit_amount_summary(self) -> None:
+    def _emit_amount_summary(self, client_id: str) -> None:
         try:
             summary = {
                 "type": "amount_filter_summary",
                 "results_count": self.amount_results,
             }
-            self.send_message(summary)
+            self.send_message(summary, client_id=client_id)
             logger.info(
                 "Resumen de transacciones filtradas enviado (%s registros)",
                 self.amount_results,
@@ -116,6 +120,12 @@ class ResultsWorker(BaseWorker):
             logger.error("Error enviando resumen de transacciones filtradas: %s", exc)
 
     def handle_eof(self, message: Dict[str, Any]):
+        client_id = message.get("client_id", "") or self.current_client_id
+        if client_id:
+            self.current_client_id = client_id
+        else:
+            logger.warning("EOF recibido sin client_id; reenviando sin metadata de cliente")
+
         self._eof_seen += 1
         logger.info(
                 "Recibido EOF en ResultsWorker (%s/%s)",
@@ -126,8 +136,8 @@ class ResultsWorker(BaseWorker):
         if self._eof_seen >= self.expected_eof_count:
             logger.info("Todos los EOF recibidos; reenviando EOF al gateway")
             try:
-                self._emit_amount_summary()
-                self.send_eof()
+                self._emit_amount_summary(client_id)
+                self.send_eof(client_id=client_id)
             finally:
                 self.input_middleware.stop_consuming()
 
