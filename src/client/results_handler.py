@@ -278,6 +278,7 @@ class ResultsHandler:
         Returns:
             bool: False when an EOF control message is encountered.
         """
+        logger.info(f"Received message from results stream: {type(message)}")
         try:
             if isinstance(message, list):
                 for item in message:

@@ -117,7 +117,7 @@
           "environment": {
             "INPUT_QUEUE": "transactions_final_results",
             "OUTPUT_QUEUE": "gateway_results",
-            "EXPECTED_EOF_COUNT": 4
+            "EXPECTED_EOF_COUNT": 1
           }
         }
       ]

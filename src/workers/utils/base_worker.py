@@ -95,7 +95,6 @@ class BaseWorker(ABC):
             **metadata: Additional metadata fields
         """
         if self.output_middleware:
-            logger.info(f"Sending message to {self.output_middleware.channel}")
             message = create_message_with_metadata(client_id, data, **metadata)
             self.output_middleware.send(message)
     
