@@ -1,9 +1,14 @@
-#!/usr/bin/env python3
+#!/usrfrom utils.worker_config import WorkerConfig
+from utils.worker_utils import run_main, safe_float_conversion
+from filter_worker import FilterWorker
 
 import os
 import logging
 from typing import Any
-from worker_utils import FilterWorker, WorkerConfig, create_worker_main, safe_float_conversion
+
+from worker_config import WorkerConfig
+from worker_utils import run_main, safe_float_conversion
+from workers.filter.filter_worker import FilterWorker
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,22 +39,9 @@ class AmountFilterWorker(FilterWorker):
             bool: True if transaction meets the amount filter
         """
         try:
-            # Get the final amount from the transaction
-            # According to schema, we have original_amount, discount_applied and final_amount
-            # We'll use final_amount as the total amount
             final_amount = item.get('final_amount')
-            
-            if final_amount is None:
-                # If no final_amount, try to calculate it
-                original_amount = safe_float_conversion(item.get('original_amount', 0))
-                discount_applied = safe_float_conversion(item.get('discount_applied', 0))
-                final_amount = original_amount - discount_applied
-            else:
-                final_amount = safe_float_conversion(final_amount)
-            
-            # Check if it meets the minimum amount
+            final_amount = safe_float_conversion(final_amount)
             return final_amount >= self.min_amount
-            
         except Exception as e:
             logger.debug(f"Error parsing transaction amount: {e}")
             return False
@@ -67,12 +59,8 @@ def main():
 
 
 if __name__ == "__main__":
-    # Use the helper to create a robust main function
-    main_func = create_worker_main(
-        AmountFilterWorker,
-        WorkerConfig(
+    config = WorkerConfig(
             input_queue='transactions_time_filtered',
             output_queue='transactions_final_results'
         )
-    )
-    main_func()
+    run_main(AmountFilterWorker, config)

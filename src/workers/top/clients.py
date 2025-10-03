@@ -4,7 +4,7 @@ import os
 import logging
 from collections import defaultdict
 from typing import Any, Dict, List, Tuple
-from worker_utils import MultiSourceWorker, WorkerConfig, create_worker_main, safe_int_conversion
+from worker_utils import MultiSourceWorker, WorkerConfig, run_main, safe_int_conversion
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -241,5 +241,5 @@ if __name__ == "__main__":
         
         return TopClientsWorkerRefactored(config, additional_queues)
     
-    main_func = create_worker_main(create_top_clients_worker)
+    main_func = run_main(create_top_clients_worker)
     main_func()

@@ -4,7 +4,9 @@ import os
 import logging
 from typing import Any
 from datetime import time
-from worker_utils import FilterWorker, extract_time_safe, create_worker_main, WorkerConfig
+from filter_worker import FilterWorker
+from worker_config import WorkerConfig
+from worker_utils import extract_time_safe, run_main
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -19,7 +21,6 @@ class TimeFilterWorker(FilterWorker):
     
     def _initialize_worker(self):
         """Initialize worker-specific configuration."""
-        # Define time range (06:00 AM - 11:00 PM)
         start_hour = int(os.getenv('START_HOUR', '6'))
         end_hour = int(os.getenv('END_HOUR', '23'))
         
@@ -57,25 +58,9 @@ class TimeFilterWorker(FilterWorker):
             logger.debug(f"Error parsing transaction time: {e}")
             return False
 
-
-def main():
-    """Main entry point."""
-    config = WorkerConfig(
-        input_queue='transactions_year_filtered',
-        output_queue='transactions_time_filtered'
-    )
-
-    worker = TimeFilterWorker(config)
-    worker.start_consuming()
-
-
 if __name__ == "__main__":
-    # Use the helper to create a robust main function
-    main_func = create_worker_main(
-        TimeFilterWorker,
-        WorkerConfig(
+    config = WorkerConfig(
             input_queue='transactions_year_filtered',
             output_queue='transactions_time_filtered'
         )
-    )
-    main_func()
+    run_main(TimeFilterWorker, config)

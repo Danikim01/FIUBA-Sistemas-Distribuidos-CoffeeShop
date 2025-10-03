@@ -82,7 +82,7 @@ class BaseWorker(ABC):
             signum: Signal number
             frame: Current stack frame
         """
-        logger.info("SIGTERM received, initiating graceful shutdown...")
+        logger.info("SIGTERM received, initiating graceful shutdown...", signum, frame)
         self.input_middleware.stop_consuming()
         self.shutdown_requested = True
     
@@ -166,7 +166,9 @@ class BaseWorker(ABC):
                     
                     # Store client_id for use in response methods
                     self.current_client_id = client_id
-                    
+
+                    logger.info(f"Processing message for client {client_id}")
+
                     if isinstance(actual_data, list):
                         self.process_batch(actual_data)
                     else:
