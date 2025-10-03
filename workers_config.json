@@ -14,7 +14,13 @@
       "MENU_ITEMS_QUEUE": "menu_items_raw",
       "CHUNK_SIZE": 5000
     },
-    "client": {}
+    "client": {
+      "GATEWAY_HOST": "localhost",
+      "GATEWAY_PORT": "12345",
+      "BATCH_MAX_SIZE_KB": "64",
+      "LOG_LEVEL": "INFO",
+      "DATA_DIR": ".data"
+    }
   },
   "workers": {
     "year_filter": {

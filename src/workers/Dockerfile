@@ -19,4 +19,4 @@ COPY src/workers/ .
 ENV PYTHONPATH=/app
 
 # Default command (can be overridden)
-CMD ["python", "year_filter_worker.py"]
+CMD ["python", "filter/year.py"]

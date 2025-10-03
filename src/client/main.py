@@ -2,12 +2,11 @@ import os
 import csv
 import socket
 import logging
-import yaml
 import sys
 import json
 import signal
 from typing import List, Dict, Any
-from protocol import (DataType, send_batch, send_eof, receive_response)
+from client.protocol import (DataType, send_batch, send_eof, receive_response)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,22 +23,34 @@ def handle_sigterm(signum, frame):
     logger.info("SIGTERM recibido, iniciando shutdown ordenado...")
     shutdown_requested = True
 
-def load_config(config_input) -> Dict[str, Any]:
-    """Load configuration from YAML file or dictionary"""
+def load_config_from_json(config_file: str = 'workers_config.json') -> Dict[str, Any]:
+    """Load configuration from JSON file"""
     try:
-        # If it's already a dictionary, return it
-        if isinstance(config_input, dict):
-            return config_input
+        # Try to load from the current directory first
+        if os.path.exists(config_file):
+            config_path = config_file
+        else:
+            # Try to load from parent directory (common location)
+            parent_config = os.path.join('..', '..', config_file)
+            if os.path.exists(parent_config):
+                config_path = parent_config
+            else:
+                logger.warning(f"Config file {config_file} not found, using defaults")
+                return {}
         
-        # Otherwise, treat it as a file path
-        with open(config_input, 'r') as f:
-            config = yaml.safe_load(f)
-        return config if config else {}
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        
+        logger.info(f"Loaded configuration from {config_path}")
+        return config
     except FileNotFoundError:
-        logger.warning(f"Config file {config_input} not found, using defaults")
+        logger.warning(f"Config file {config_file} not found, using defaults")
+        return {}
+    except json.JSONDecodeError as e:
+        logger.error(f"Error parsing JSON config file {config_file}: {e}")
         return {}
     except Exception as e:
-        logger.error(f"Error reading config file {config_input}: {e}")
+        logger.error(f"Error reading config file {config_file}: {e}")
         return {}
 
 # Maximum serialized size per row type in bytes (calculated from CSV structure analysis)
@@ -58,32 +69,37 @@ def get_max_row_size(data_type: DataType) -> int:
     """Get the maximum serialized size for a row of the given data type"""
     return MAX_ROW_SIZES.get(data_type, 100)  # Default to 100 if unknown type
 
-def estimate_row_size(data_type: DataType, sample_row: Dict[str, Any] = None) -> int:
+def estimate_row_size(data_type: DataType, sample_row: Dict[str, Any] | None = None) -> int:
     """Estimate the serialized size of a row in bytes using hardcoded maximums"""
     # Use hardcoded maximum sizes instead of actual serialization
     # This is more efficient and the sizes are predictable based on CSV structure
     return get_max_row_size(data_type)
 
 class CoffeeShopClient:
-    def __init__(self, config_input='config.yaml'):
-        # Load configuration
-        self.config = load_config(config_input)
+    def __init__(self, config_file: str = 'workers_config.json'):
+        # Load configuration from JSON file
+        config = load_config_from_json(config_file)
+        
+        # Get common environment configuration
+        common_env = config.get('common_environment', {})
+        
+        # Get client-specific configuration
+        client_config = config.get('service_environment', {}).get('client', {})
         
         # Gateway configuration with environment variable fallback
-        gateway_config = self.config.get('gateway', {})
-        self.gateway_host = os.getenv('GATEWAY_HOST', gateway_config.get('host', 'localhost'))
-        self.gateway_port = int(os.getenv('GATEWAY_PORT', gateway_config.get('port', 12345)))
+        self.gateway_host = os.getenv('GATEWAY_HOST', client_config.get('GATEWAY_HOST', 'localhost'))
+        self.gateway_port = int(os.getenv('GATEWAY_PORT', client_config.get('GATEWAY_PORT', '12345')))
         
         # Batch configuration
-        batch_config = self.config.get('batch', {})
-        self.max_batch_size_kb = batch_config.get('max_size_kb', 64)
+        self.max_batch_size_kb = int(os.getenv('BATCH_MAX_SIZE_KB', client_config.get('BATCH_MAX_SIZE_KB', '64')))
         
         # Logging configuration
-        log_config = self.config.get('logging', {})
-        log_level = log_config.get('level', 'INFO')
-        logging.getLogger().setLevel(getattr(logging, log_level.upper(), logging.INFO))
+        log_level = os.getenv('LOG_LEVEL', client_config.get('LOG_LEVEL', 'INFO')).upper()
+        logging.getLogger().setLevel(getattr(logging, log_level, logging.INFO))
         
-        self.data_dir = '.data'
+        # Data directory configuration
+        self.data_dir = os.getenv('DATA_DIR', client_config.get('DATA_DIR', '.data'))
+        
         self.socket: socket.socket | None = None
         self.results_received = 0
         self._tpv_header_printed = False
@@ -99,7 +115,7 @@ class CoffeeShopClient:
 
         logger.info(
             f"Client configured - Gateway: {self.gateway_host}:{self.gateway_port}, "
-            f"Batch: {self.max_batch_size_kb}KB max"
+            f"Batch: {self.max_batch_size_kb}KB max, Data dir: {self.data_dir}"
         )
         
     def connect_to_gateway(self):
@@ -446,6 +462,10 @@ class CoffeeShopClient:
     
     def _send_batch_to_gateway(self, batch, data_type: DataType) -> bool:
         """Send a batch to the gateway and handle response"""
+        if not self.socket:
+            logger.error("No socket connection available")
+            return False
+            
         try:
             send_batch(self.socket, data_type, batch)
             
@@ -490,7 +510,8 @@ class CoffeeShopClient:
         
         if not csv_files:
             logger.info(f"No CSV files found for {data_type_str}")
-            send_eof(self.socket, data_type)
+            if self.socket:
+                send_eof(self.socket, data_type)
             return
         
         total_rows = 0
@@ -513,6 +534,10 @@ class CoffeeShopClient:
                    f"(batch size: {batch_size} rows)")
         
         # Send EOF for this data type
+        if not self.socket:
+            logger.error("No socket connection available for EOF")
+            return
+            
         try:
             send_eof(self.socket, data_type)
             logger.info(f"Sent EOF for {data_type_str}")
@@ -567,7 +592,11 @@ def main():
     # Configurar manejo de SIGTERM
     signal.signal(signal.SIGTERM, handle_sigterm)
     
-    config_file = sys.argv[1] if len(sys.argv) > 1 else 'config.yaml'
+    # Get config file from command line or use default
+    config_file = sys.argv[1] if len(sys.argv) > 1 else 'workers_config.json'
+    
+    logger.info(f"Starting Coffee Shop Client with config file: {config_file}")
+    
     client = CoffeeShopClient(config_file)
     client.run()
 
