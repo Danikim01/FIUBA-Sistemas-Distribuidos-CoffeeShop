@@ -30,7 +30,8 @@
           "count": 2,
           "environment": {
             "INPUT_QUEUE": "transactions_raw",
-            "OUTPUT_QUEUE": "transactions_year_filtered"
+            "OUTPUT_QUEUE": "transactions_year_filtered",
+            "SECONDARY_OUTPUT_QUEUE": "transactions_filtered_by_year"
           }
         }
       ]
@@ -55,18 +56,6 @@
           "environment": {
             "INPUT_QUEUE": "transactions_time_filtered",
             "OUTPUT_QUEUE": "gateway_results"
-          }
-        }
-      ]
-    },
-    "transactions_projection": {
-      "prefetch_count": 20,
-      "groups": [
-        {
-          "count": 1,
-          "environment": {
-            "INPUT_QUEUE": "transactions_year_for_top_clients",
-            "OUTPUT_QUEUE": "transactions_compact"
           }
         }
       ]
@@ -115,17 +104,6 @@
           "environment": {
             "INPUT_QUEUE": "top_clients_partial",
             "CLIENT_DATA_QUEUE": "client_data_raw",
-            "OUTPUT_QUEUE": "gateway_results"
-          }
-        }
-      ]
-    },
-    "results": {
-      "groups": [
-        {
-          "count": 1,
-          "environment": {
-            "INPUT_QUEUE": "transactions_final_results",
             "OUTPUT_QUEUE": "gateway_results"
           }
         }

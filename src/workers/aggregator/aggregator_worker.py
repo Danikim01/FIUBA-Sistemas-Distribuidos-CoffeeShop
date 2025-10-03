@@ -59,6 +59,7 @@ class AggregatorWorker(BaseWorker):
                 logger.info("EOF received from auxiliary source %s", source_name)
                 self._sources_completed.add(source_name)
                 middleware.stop_consuming()
+                self.on_auxiliary_eof(source_name)
                 return
 
             handler(message)
@@ -67,6 +68,11 @@ class AggregatorWorker(BaseWorker):
             middleware.start_consuming(on_message)
         except Exception as exc:  # noqa: BLE001
             logger.error("Error consuming from %s: %s", source_name, exc)
+
+    def on_auxiliary_eof(self, source_name: str) -> None:
+        """Hook for subclasses to react when an auxiliary source finishes."""
+
+        _ = source_name  # default no-op
 
     # ------------------------------------------------------------------
     # EOF coordination

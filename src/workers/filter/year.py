@@ -2,9 +2,12 @@
 
 import os
 import logging
-from typing import Any
 from datetime import datetime
+from typing import Any, List
+
 from filter_worker import FilterWorker
+from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
+from message_utils import create_message_with_metadata
 from worker_config import WorkerConfig
 from worker_utils import run_main
 
@@ -28,6 +31,17 @@ class YearFilterWorker(FilterWorker):
         self.min_year = min_year
         self.max_year = max_year
 
+        secondary_queue = os.getenv('SECONDARY_OUTPUT_QUEUE', '').strip()
+        if secondary_queue:
+            params = self.config.get_rabbitmq_connection_params()
+            self.secondary_output = RabbitMQMiddlewareQueue(
+                host=params['host'],
+                port=params['port'],
+                queue_name=secondary_queue,
+            )
+        else:
+            self.secondary_output = None
+
         logger.info(f"TimeFilterWorker configured with time range: {self.min_year} - {self.max_year}")
 
     def apply_filter(self, item: Any) -> bool:
@@ -42,6 +56,29 @@ class YearFilterWorker(FilterWorker):
         except Exception as e:
             logger.error(f"No se pudo parsear created_at en item {item}: {e}")
             return False
+
+    def _forward_filtered(self, payload: Any) -> None:
+        self.send_message(payload)
+        if self.secondary_output:
+            message = create_message_with_metadata(self.current_client_id, payload)
+            self.secondary_output.send(message)
+
+    def process_message(self, message: Any):
+        if self.apply_filter(message):
+            self._forward_filtered(message)
+
+    def process_batch(self, batch: List[Any]):
+        filtered_items = [item for item in batch if self.apply_filter(item)]
+        if filtered_items:
+            self._forward_filtered(filtered_items)
+
+    def cleanup(self):
+        super().cleanup()
+        if self.secondary_output:
+            try:
+                self.secondary_output.close()
+            except Exception:  # noqa: BLE001
+                pass
 
 if __name__ == "__main__":
     run_main(YearFilterWorker)

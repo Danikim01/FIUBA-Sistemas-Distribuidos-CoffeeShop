@@ -88,6 +88,10 @@ class TopClientsBirthdaysAggregator(AggregatorWorker):
         self.start_auxiliary_source('client_data', handler)
         self._maybe_finalize()
 
+    def on_auxiliary_eof(self, source_name: str) -> None:
+        if source_name == 'client_data':
+            self._maybe_finalize()
+
     # ------------------------------------------------------------------
     # Main stream processing
     # ------------------------------------------------------------------

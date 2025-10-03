@@ -35,7 +35,12 @@ class TopClientsWorker(TopWorker):
         try:
             store_id = safe_int_conversion(payload.get('store_id'))
             user_id = safe_int_conversion(payload.get('user_id'))
-            quantity = safe_int_conversion(payload.get('purchase_qty'))
+            raw_qty = (
+                payload.get('purchase_qty')
+                if 'purchase_qty' in payload
+                else payload.get('purchases_qty', 1)
+            )
+            quantity = safe_int_conversion(raw_qty, 1)
         except Exception:  # noqa: BLE001
             logger.debug("Invalid transaction skipped: %s", payload)
             return
