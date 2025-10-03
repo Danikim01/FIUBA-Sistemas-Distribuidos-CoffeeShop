@@ -84,10 +84,9 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "default_prefetch": 20,
         "default_environment": {
             "INPUT_QUEUE": "transactions_year_for_top_clients",
-            "STORES_QUEUE": "stores_raw",
             "OUTPUT_QUEUE": "transactions_final_results",
         },
-        "required_environment": ["INPUT_QUEUE", "STORES_QUEUE", "OUTPUT_QUEUE"],
+        "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": True,
     },
     "tpv": {

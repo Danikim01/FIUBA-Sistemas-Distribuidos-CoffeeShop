@@ -67,19 +67,6 @@
         }
       ]
     },
-    "stores_enrichment": {
-      "prefetch_count": 20,
-      "groups": [
-        {
-          "count": 1,
-          "environment": {
-            "STORES_INPUT_QUEUE": "stores_raw",
-            "TPV_INPUT_QUEUE": "tpv_results",
-            "OUTPUT_QUEUE": "transactions_final_results"
-          }
-        }
-      ]
-    },
     "tpv": {
       "prefetch_count": 20,
       "groups": [
@@ -87,7 +74,7 @@
           "count": 1,
           "environment": {
             "INPUT_QUEUE": "transactions_time_filtered_tpv",
-            "OUTPUT_QUEUE": "tpv_results"
+            "OUTPUT_QUEUE": "transactions_final_results"
           }
         }
       ]

@@ -156,33 +156,6 @@ class CoffeeShopClient:
         print("=" * 60)
         self._top_clients_header_printed = True
 
-    def _ensure_top_clients_summary(self) -> None:
-        if self._top_clients_summary_printed:
-            return
-
-        if self._top_clients_total > 0:
-            print(
-                "Total de clientes destacados que cumplen las condiciones: "
-                f"{self._top_clients_total}"
-            )
-            print("-" * 50)
-        else:
-            print("Sin clientes destacados que cumplan las condiciones.")
-            print("-" * 50)
-
-        self._top_clients_summary_printed = True
-        logger.info(
-            "Reported total of %s clientes destacados al usuario",
-            self._top_clients_total,
-        )
-
-    def _print_results_summary(self) -> None:
-        if not self._amount_summary_printed and self._amount_results_total:
-            self._render_amount_summary({'results_count': self._amount_results_total})
-
-        self._print_top_clients_header()
-        self._ensure_top_clients_summary()
-
     def _render_top_items_table(
         self,
         title: str,
@@ -248,7 +221,6 @@ class CoffeeShopClient:
         if not getattr(self, '_top_clients_section_printed', False):
             print("=" * 60)
             print("TOP CLIENTES POR SUCURSAL (2024-2025)")
-            print("Incluye empates hasta el tercer nivel de compras")
             print("=" * 60)
             self._top_clients_section_printed = True
 
@@ -282,7 +254,8 @@ class CoffeeShopClient:
             normalized_type = str(message_type).upper()
             if normalized_type == 'EOF':
                 logger.info("Received EOF control message from results stream")
-                self._print_results_summary()
+                if not self._amount_summary_printed and self._amount_results_total:
+                    self._render_amount_summary({'results_count': self._amount_results_total})
                 return False
             if normalized_type == 'TPV_SUMMARY':
                 self._render_tpv_summary(result)
