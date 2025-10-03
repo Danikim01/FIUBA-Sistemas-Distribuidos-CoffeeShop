@@ -7,14 +7,7 @@ import os
 from collections import defaultdict
 from typing import Any, DefaultDict, Dict
 
-try:
-    from workers.worker_utils import (  # type: ignore
-        run_main,
-        safe_int_conversion,
-    )
-except ImportError:  # pragma: no cover - legacy fallback
-    from worker_utils import run_main, safe_int_conversion  # type: ignore
-
+from worker_utils import run_main, safe_int_conversion
 from workers.top.top_worker import TopWorker
 
 
@@ -119,10 +112,5 @@ class TopClientsWorker(TopWorker):
         self.send_eof(client_id=client_id, additional_data={'source': 'top_clients'})
         self.reset_client(client_id)
 
-
-def main() -> None:
-    run_main(TopClientsWorker)
-
-
 if __name__ == '__main__':
-    main()
+    run_main(TopClientsWorker)

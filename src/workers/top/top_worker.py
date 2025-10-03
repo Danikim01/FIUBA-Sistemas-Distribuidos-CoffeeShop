@@ -2,13 +2,10 @@
 
 from collections import defaultdict
 from typing import Any, Callable, DefaultDict, Dict, TypeVar
-
 from workers.utils.base_worker import BaseWorker
-
 
 StateDict = Dict[str, Any]
 T = TypeVar("T")
-
 
 class TopWorker(BaseWorker):
     """Base class for single-source top workers with per-client state helpers."""
