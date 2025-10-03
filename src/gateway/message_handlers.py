@@ -4,8 +4,8 @@ import logging
 import socket
 from typing import Any, Dict, Tuple
 
-from gateway.protocol import (
-    DataType, send_response, parse_batch_message, parse_eof_message
+from protocol import (
+    DataType, send_response, parse_batch_message, parse_eof_message # type: ignore
 )
 from queue_manager import QueueManager
 

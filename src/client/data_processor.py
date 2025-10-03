@@ -4,7 +4,7 @@ import os
 import csv
 import logging
 from typing import List, Dict, Any
-from client.protocol import DataType
+from protocol import DataType # type: ignore
 
 logger = logging.getLogger(__name__)
 

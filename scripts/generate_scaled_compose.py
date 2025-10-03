@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate docker-compose-scaled.yml based on worker scaling config."""
+"""Generate docker-compose.yml based on worker scaling config."""
 
 from __future__ import annotations
 

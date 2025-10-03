@@ -6,7 +6,7 @@ import threading
 import json
 from typing import Any
 
-from gateway.protocol import DataType, MessageType, receive_message, send_response
+from protocol import DataType, MessageType, receive_message, send_response # type: ignore
 from message_handlers import MessageHandlers
 from queue_manager import QueueManager
 from client_session import ClientSessionManager

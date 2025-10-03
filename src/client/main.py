@@ -4,10 +4,10 @@ import sys
 import signal
 from typing import Any
 
-from client.config import ClientConfig
-from client.data_processor import DataProcessor
-from client.results_handler import ResultsHandler
-from client.client_connection import ClientConnection, DataSender
+from config import ClientConfig
+from data_processor import DataProcessor
+from results_handler import ResultsHandler
+from client_connection import ClientConnection, DataSender
 
 logging.basicConfig(
     level=logging.INFO,

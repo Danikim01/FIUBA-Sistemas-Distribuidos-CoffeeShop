@@ -3,7 +3,7 @@
 import socket
 import logging
 from typing import List, Dict, Any
-from client.protocol import DataType, send_batch, send_eof, receive_response
+from protocol import DataType, send_batch, send_eof, receive_response # type: ignore
 
 logger = logging.getLogger(__name__)
 
