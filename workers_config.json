@@ -48,7 +48,7 @@
     "amount_filter": {
       "count": 2,
       "environment": {
-        "INPUT_QUEUE": "transactions_time_filtered",
+        "INPUT_EXCHANGE": "transactions_time_filtered",
         "OUTPUT_QUEUE": "gateway_results"
       }
     },

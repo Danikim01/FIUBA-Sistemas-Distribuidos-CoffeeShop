@@ -65,5 +65,5 @@ class EOFHandler:
         Args:
             message: EOF message dictionary
         """
-        message = create_message_with_metadata(client_id, data=None, message_type='EOF')
+        message = create_message_with_metadata(client_id, data=None, message_type='EOF', additional_metadata=counter)
         self.middleware_config.input_middleware.send(message)

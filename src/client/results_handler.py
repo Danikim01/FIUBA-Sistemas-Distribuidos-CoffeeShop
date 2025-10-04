@@ -2,18 +2,20 @@
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
-
 logger = logging.getLogger(__name__)
-
 
 class ResultsHandler:
     """Handles result processing and stores formatted output into files."""
 
     def __init__(self) -> None:
-        self.results_received = 0
+        self.queries_expected = int(os.getenv("QUERIES_EXPECTED", "4")) # Default to 4 queries
+        self.queries_completed = 0
+
+        self.query1_items_received = 0
         self.results_dir = Path(".results")
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -120,7 +122,7 @@ class ResultsHandler:
                 body_lines.append(f"{transaction_id} - {amount_str}")
 
         self._append_to_file("amount_filter_transactions.txt", body_lines, client_id)
-        self.results_received += total
+        self.query1_items_received += total
 
     def _render_top_items_table(
         self,
@@ -167,7 +169,7 @@ class ResultsHandler:
             body_lines.append("-" * 50)
 
         self._append_to_file(filename, body_lines, client_id)
-        self.results_received += len(rows)
+        self.query1_items_received += len(rows)
 
     def _render_top_clients_birthdays(self, payload: Dict[str, Any], client_id: str) -> None:
         """Persist top clients birthdays into the results folder."""
@@ -204,7 +206,7 @@ class ResultsHandler:
             body_lines.append("-" * 50)
 
         self._append_to_file("top_clients_birthdays.txt", body_lines, client_id)
-        self.results_received += len(rows)
+        self.query1_items_received += len(rows)
 
     def _render_tpv_summary(self, payload: Dict[str, Any], client_id: str) -> None:
         """Persist TPV summary results."""
@@ -244,7 +246,148 @@ class ResultsHandler:
             body_lines.append("-" * 50)
 
         self._append_to_file("tpv_summary.txt", body_lines, client_id)
-        self.results_received += len(results)
+        self.query1_items_received += len(results)
+
+    def _process_quantity_profit_bundle(self, bundle: Dict[str, Any], client_id: str) -> bool:
+        """Process bundled quantity/profit results emitted without explicit types."""
+
+        processed = False
+
+        quantity_rows = bundle.get("quantity")
+        if isinstance(quantity_rows, list):
+            self._render_top_items_table(
+                {"results": quantity_rows},
+                "TOP ÍTEMS POR CANTIDAD (2024-2025, 06:00-23:00)",
+                "sellings_qty",
+                "top_items_by_quantity.txt",
+                client_id,
+            )
+            processed = True
+
+        profit_rows = bundle.get("profit")
+        if isinstance(profit_rows, list):
+            self._render_top_items_table(
+                {"results": profit_rows},
+                "TOP ÍTEMS POR GANANCIA (2024-2025, 06:00-23:00)",
+                "profit_sum",
+                "top_items_by_profit.txt",
+                client_id,
+            )
+            processed = True
+
+        return processed
+
+    def _process_data_list(self, rows: List[Any], client_id: str) -> bool:
+        """Infer result type from a list payload when message type is missing."""
+
+        if not rows:
+            return False
+
+        first_entry = rows[0]
+        if isinstance(first_entry, dict) and {"quantity", "profit"}.issubset(first_entry.keys()):
+            return self._process_quantity_profit_bundle(first_entry, client_id)
+
+        if not all(isinstance(row, dict) for row in rows):
+            return False
+
+        sample_keys = {key for key in rows[0] if isinstance(key, str)}
+
+        if "transaction_id" in sample_keys or "final_amount" in sample_keys:
+            self._render_amount_transactions({"data": rows}, client_id)
+            return True
+
+        if {"year_month_created_at", "sellings_qty"}.issubset(sample_keys):
+            self._render_top_items_table(
+                {"results": rows},
+                "TOP ÍTEMS POR CANTIDAD (2024-2025, 06:00-23:00)",
+                "sellings_qty",
+                "top_items_by_quantity.txt",
+                client_id,
+            )
+            return True
+
+        if {"year_month_created_at", "profit_sum"}.issubset(sample_keys):
+            self._render_top_items_table(
+                {"results": rows},
+                "TOP ÍTEMS POR GANANCIA (2024-2025, 06:00-23:00)",
+                "profit_sum",
+                "top_items_by_profit.txt",
+                client_id,
+            )
+            return True
+
+        if "tpv" in sample_keys or {
+            "year",
+            "semester",
+            "store_name",
+        }.intersection(sample_keys):
+            self._render_tpv_summary({"results": rows}, client_id)
+            return True
+
+        if {"user_id", "purchases_qty"}.issubset(sample_keys) or "birthdate" in sample_keys:
+            self._render_top_clients_birthdays({"results": rows}, client_id)
+            return True
+
+        return False
+
+    def _process_data_dict(self, data: Dict[str, Any], client_id: str) -> bool:
+        """Infer result type from a dict payload when message type is missing."""
+
+        if {"quantity", "profit"}.issubset(data.keys()):
+            return self._process_quantity_profit_bundle(data, client_id)
+
+        results_section = data.get("results")
+        if isinstance(results_section, list):
+            nested_type = str(data.get("type") or "").upper()
+
+            if nested_type == "TOP_ITEMS_BY_QUANTITY":
+                self._render_top_items_table(
+                    {"results": results_section},
+                    "TOP ÍTEMS POR CANTIDAD (2024-2025, 06:00-23:00)",
+                    "sellings_qty",
+                    "top_items_by_quantity.txt",
+                    client_id,
+                )
+                return True
+
+            if nested_type == "TOP_ITEMS_BY_PROFIT":
+                self._render_top_items_table(
+                    {"results": results_section},
+                    "TOP ÍTEMS POR GANANCIA (2024-2025, 06:00-23:00)",
+                    "profit_sum",
+                    "top_items_by_profit.txt",
+                    client_id,
+                )
+                return True
+
+            if nested_type == "TPV_SUMMARY":
+                self._render_tpv_summary({"results": results_section}, client_id)
+                return True
+
+            if nested_type in {"TOP_CLIENTS_BIRTHDAYS", "TOP_CLIENTS_PARTIAL"}:
+                self._render_top_clients_birthdays({"results": results_section}, client_id)
+                return True
+
+            if nested_type in {"AMOUNT_FILTER_TRANSACTIONS", "AMOUNT_FILTER_SUMMARY"}:
+                self._render_amount_transactions({"data": results_section}, client_id)
+                return True
+
+            return self._process_data_list(results_section, client_id)
+
+        return False
+
+    def _process_implicit_payload(self, result: Dict[str, Any], client_id: str) -> bool:
+        """Handle messages without a recognized type by examining their payload."""
+
+        data_section = result.get("data")
+
+        if isinstance(data_section, dict):
+            return self._process_data_dict(data_section, client_id)
+
+        if isinstance(data_section, list):
+            return self._process_data_list(data_section, client_id)
+
+        return False
 
     def handle_single_result(self, result: Dict[str, Any]) -> bool:
         """Process a single result message.
@@ -301,11 +444,9 @@ class ResultsHandler:
         if normalized_type in {"AMOUNT_FILTER_TRANSACTIONS", "AMOUNT_FILTER_SUMMARY"}:
             self._render_amount_transactions(result, client_id)
             return True
-        if not normalized_type:
-            data_section = result.get("data")
-            if isinstance(data_section, list):
-                self._render_amount_transactions(result, client_id)
-                return True
+
+        if self._process_implicit_payload(result, client_id):
+            return True
 
         logger.debug("Resultado no reconocido, se omite: %s", result)
         return True
@@ -338,7 +479,7 @@ class ResultsHandler:
         try:
             logger.info("Waiting for processed results from gateway")
 
-            while True:
+            while self.queries_completed < self.queries_expected:
                 chunk = socket_connection.recv(4096)
                 if not chunk:
                     logger.info("Gateway closed the connection")
@@ -359,12 +500,12 @@ class ResultsHandler:
                         continue
 
                     if not self.handle_results_message(message):
-                        logger.info("EOF received from gateway; stopping listener")
-                        return
+                        logger.info("EOF received from gateway")
+                        self.queries_completed += 1
 
         except KeyboardInterrupt:
             logger.info("Results listener interrupted by user")
         except Exception as exc:  # noqa: BLE001
             logger.error(f"Error while listening for results: {exc}")
         finally:
-            logger.info(f"Total results received: {self.results_received}")
+            logger.info(f"Total results received: {self.query1_items_received}")

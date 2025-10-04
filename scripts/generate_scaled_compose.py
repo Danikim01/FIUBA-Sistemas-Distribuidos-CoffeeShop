@@ -55,7 +55,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "base_service_name": "amount-filter-worker",
         "command": ["python", "filter/amount.py"],
         "needs_worker_id": True,
-        "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
+        "required_environment": ["INPUT_EXCHANGE", "OUTPUT_QUEUE"],
         "scalable": True,
     },
     "tpv": {
