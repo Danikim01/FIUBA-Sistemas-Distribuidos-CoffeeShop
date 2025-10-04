@@ -39,7 +39,7 @@ class Done:
         If `timeout` elapses first, the callback is not invoked.
         """
         def _wait_and_call():
-            if self._is_done(timeout=timeout):
+            if self._is_done(block=True, timeout=timeout):
                 return callback(*args, **kwargs)
     
         t = threading.Thread(

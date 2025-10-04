@@ -90,16 +90,19 @@ class ExtraSource(ABC):
         self,
         client_id: ClientId,
         item_id: str,
+        *,
+        timeout: float | None = None,
     ):
-        """
-        Wait for the client_id to be done and then retrieve the item.
-        """
-        if client_id not in self.client_done:
-            self.client_done[client_id] = Done()
+        """Block until the extra source finished for ``client_id`` and then return the item."""
+        done = self.client_done.setdefault(client_id, Done())
 
-        self.client_done[client_id].when_done(
-            name=f"get_item_when_done_{self.name}_{client_id}_{item_id}",
-            callback=self.get_item,
-            client_id=client_id,
-            item_id=item_id,
-        )
+        is_ready = done._is_done(block=True, timeout=timeout)
+        if not is_ready:
+            logger.warning(
+                "Extra source %s timed out waiting for client %s before retrieving %s",
+                self.name,
+                client_id,
+                item_id,
+            )
+
+        return self.get_item(client_id, item_id)
