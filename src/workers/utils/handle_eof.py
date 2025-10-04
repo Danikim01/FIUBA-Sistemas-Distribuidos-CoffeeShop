@@ -11,8 +11,8 @@ Counter = Dict[int, int]  # [worker_id, count]
 class EOFHandler:
     def __init__(self, middleware_config: MiddlewareConfig):
         self.max_retries: int = int(os.getenv('MAX_EOF_RETRIES', '5'))
-        self.worker_id: int = int(os.getenv('WORKER_ID', '0'), 0)
-        self.replica_count: int = int(os.getenv('REPLICA_COUNT', '1'), 1)
+        self.worker_id: int = int(os.getenv('WORKER_ID', '0'))
+        self.replica_count: int = int(os.getenv('REPLICA_COUNT', '1'))
         self.middleware_config = middleware_config
 
     def handle_eof(self, message: Dict[str, Any], current_client_id: ClientId):

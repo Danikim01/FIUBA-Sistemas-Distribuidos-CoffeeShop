@@ -20,7 +20,6 @@ class TopClientsBirthdaysAggregator(BaseWorker):
         self.stores_source = StoresExtraSource(self.middleware_config)
         self.stores_source.start_consuming()
 
-        self.
 
         self.recieved_payloads = []
     
@@ -34,7 +33,7 @@ class TopClientsBirthdaysAggregator(BaseWorker):
     def cleanup(self):
         super().cleanup()
         try:
-            self.clients_queue.close()
+            self.stores_source.close()
         except Exception:  # noqa: BLE001
             logger.warning("Failed to close extra input queue", exc_info=True)
 

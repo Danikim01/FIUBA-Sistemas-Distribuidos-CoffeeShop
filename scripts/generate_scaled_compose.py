@@ -192,12 +192,15 @@ def normalize_environment(overrides: Optional[Mapping[str, Any]], context: str) 
     return {key: str(value) for key, value in mapping.items()}
 
 
-def render_base_services(service_env_cfg: object) -> str:
+def render_base_services(service_env_cfg: object, base_env: Mapping[str, str]) -> str:
     service_env_map = ensure_mapping(service_env_cfg, "'service_environment'") or {}
 
-    gateway_env = normalize_environment(
-        service_env_map.get("gateway"),
-        "Service 'gateway' environment",
+    gateway_env = dict(base_env)
+    gateway_env.update(
+        normalize_environment(
+            service_env_map.get("gateway"),
+            "Service 'gateway' environment",
+        )
     )
     client_env = normalize_environment(
         service_env_map.get("client"),
@@ -422,7 +425,7 @@ def generate_compose(config: Dict[str, Any]) -> str:
     worker_settings = load_worker_settings(raw_workers)
     worker_sections = generate_worker_sections(worker_settings, common_env, global_prefetch)
 
-    base_services = render_base_services(config.get("service_environment"))
+    base_services = render_base_services(config.get("service_environment"), common_env)
 
     compose_parts = [base_services.rstrip()]
     if worker_sections:

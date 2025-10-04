@@ -122,8 +122,6 @@ class ClientHandler:
                     eof_sent = True
                 except Exception as exc:
                     logger.error(f"Failed to send EOF to client {client_id}: {exc}")
-                finally:
-                    results_queue.stop_consuming()
                 return
 
             if not isinstance(payload, dict):
@@ -146,7 +144,6 @@ class ClientHandler:
                 self._send_json_line(client_socket, result_payload)
             except Exception as exc:
                 logger.error(f"Failed to forward result to client {client_id}: {exc}")
-                results_queue.stop_consuming()
 
         def on_message(message: Any) -> None:
             try:
@@ -154,7 +151,6 @@ class ClientHandler:
                 handle_payload(message)
             except Exception as exc:  # noqa: BLE001
                 logger.error(f"Unexpected error forwarding results for client {client_id}: {exc}")
-                results_queue.stop_consuming()
 
         try:
             results_queue.start_consuming(on_message)

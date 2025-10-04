@@ -77,8 +77,8 @@ class CoffeeShopClient:
         except Exception as e:
             logger.error(f"Error in client execution: {e}")
             return False
-        finally:
-            self.connection.disconnect()
+        # finally:
+        #     self.connection.disconnect()
 
 def main():
     """Entry point for the Coffee Shop Client application."""
