@@ -38,13 +38,9 @@ class TopWorker(BaseWorker):
 
         self.send_eof(client_id=client_id)
 
-    def process_message(self, message: Any):
-        if not isinstance(message, dict):
-            logger.debug("Ignoring non-dict payload: %s", type(message))
-            return
-        
-        client_id = self.current_client_id or ''
-        if not client_id:
+    def process_message(self, message: dict):
+        client_id = self.current_client_id or message.get('client_id', '')
+        if not client_id or client_id == '':
             logger.warning("Transaction received without client metadata")
             return
 
@@ -57,5 +53,4 @@ class TopWorker(BaseWorker):
             return
 
         for entry in batch:
-            if isinstance(entry, dict):
-                self._accumulate_transaction(client_id, entry)
+            self._accumulate_transaction(client_id, entry)

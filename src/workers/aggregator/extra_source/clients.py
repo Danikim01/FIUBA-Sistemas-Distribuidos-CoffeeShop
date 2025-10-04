@@ -18,6 +18,7 @@ class ClientsExtraSource(ExtraSource):
         """
         clients_queue = os.getenv('CLIENTS_QUEUE', 'clients_raw').strip()
         middleware = middleware_config.create_queue(clients_queue)
+        
         super().__init__(clients_queue, middleware)
     
     def save_message(self, message: dict):

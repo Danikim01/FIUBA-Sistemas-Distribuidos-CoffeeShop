@@ -6,6 +6,7 @@ import logging
 import os
 from typing import Any
 from worker_utils import run_main
+from workers.aggregator.extra_source.stores import StoresExtraSource
 from workers.base_worker import BaseWorker
 
 logging.basicConfig(level=logging.INFO)
@@ -16,13 +17,10 @@ class TopClientsBirthdaysAggregator(BaseWorker):
 
     def __init__(self) -> None:
         super().__init__()
-        stores_exchnage = os.getenv('CLIENTS_QUEUE', 'clients_raw').strip()
-        self.clients_queue = ExtraSource(self.middleware_config, stores_exchnage, save_to_disk=True)
-        self.clients_queue.start_consuming()
+        self.stores_source = StoresExtraSource(self.middleware_config)
+        self.stores_source.start_consuming()
 
-        stores_exchange = os.getenv('STORES_EXCHANGE', 'stores_raw').strip()
-        self.stores_exchange = ExtraSource(self.middleware_config, stores_exchange, is_exchange=True)
-        self.stores_exchange.start_consuming()
+        self.
 
         self.recieved_payloads = []
     

@@ -5,14 +5,28 @@
 import logging
 import os
 from collections import defaultdict
-from typing import Any, DefaultDict, Dict
+from typing import Any, DefaultDict, Dict, List
 from worker_utils import extract_year_month, run_main, safe_float_conversion, safe_int_conversion
 from workers.top.top_worker import TopWorker
-
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+ClientId = str
+YearMonth = str
+ItemId = int
+
+QuantityTotals = DefaultDict[ClientId, DefaultDict[YearMonth, DefaultDict[ItemId, int]]]
+ProfitTotals = DefaultDict[ClientId, DefaultDict[YearMonth, DefaultDict[ItemId, float]]]
+
+def _new_quantity_bucket() -> DefaultDict[ItemId, int]:
+    return defaultdict(int)
+def _new_profit_bucket() -> DefaultDict[ItemId, float]:
+    return defaultdict(float)
+def _new_monthly_quantity_map() -> DefaultDict[YearMonth, DefaultDict[ItemId, int]]:
+    return defaultdict(_new_quantity_bucket)
+def _new_monthly_profit_map() -> DefaultDict[YearMonth, DefaultDict[ItemId, float]]:
+    return defaultdict(_new_profit_bucket)
 
 class TopItemsWorker(TopWorker):
     """Computes best-selling and most profitable items per month."""
@@ -20,12 +34,8 @@ class TopItemsWorker(TopWorker):
     def __init__(self) -> None:
         super().__init__()
         self.top_per_month = safe_int_conversion(os.getenv('TOP_ITEMS_COUNT', '1')) or 1
-        self._quantity_totals: DefaultDict[
-            str, DefaultDict[str, DefaultDict[int, int]]
-        ] = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
-        self._profit_totals: DefaultDict[
-            str, DefaultDict[str, DefaultDict[int, float]]
-        ] = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+        self._quantity_totals: QuantityTotals = defaultdict(_new_monthly_quantity_map)
+        self._profit_totals: ProfitTotals = defaultdict(_new_monthly_profit_map)
 
         logger.info("TopItemsWorker configured with top_per_month=%s", self.top_per_month)
 
@@ -49,7 +59,11 @@ class TopItemsWorker(TopWorker):
         profit_bucket = self._profit_totals[client_id][year_month]
         profit_bucket[item_id] += subtotal
 
-    def _build_results(self, totals: Dict[str, Dict[int, float]], metric_key: str) -> list[Dict[str, Any]]:
+    def _build_results(
+        self,
+        totals: Dict[YearMonth, Dict[ItemId, int | float]],
+        metric_key: str,
+    ) -> list[Dict[str, Any]]:
         results: list[Dict[str, Any]] = []
         for year_month, items_map in totals.items():
             ranked = sorted(items_map.items(), key=lambda item: (-item[1], item[0]))
@@ -71,7 +85,7 @@ class TopItemsWorker(TopWorker):
         )
         return results
 
-    def create_payload(self, client_id: str) -> Dict[str, Any]:
+    def create_payload(self, client_id: str) -> List[Dict[str, Any]]:
         quantity_totals = self._quantity_totals.pop(client_id, {})
         profit_totals = self._profit_totals.pop(client_id, {})
 
@@ -79,12 +93,11 @@ class TopItemsWorker(TopWorker):
         profit_results = self._build_results(profit_totals, 'profit_sum')
 
         payload = {
-            'type': 'top_items_partial',
             'quantity': quantity_results,
             'profit': profit_results,
         }
 
-        return payload
+        return [payload]
 
 if __name__ == '__main__':
     run_main(TopItemsWorker)
