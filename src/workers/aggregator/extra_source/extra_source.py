@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import logging
 import threading
-from typing import Any, Callable
+from typing import Any
 from message_utils import ClientId, is_eof_message
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue
 from workers.aggregator.extra_source.done import Done
@@ -96,13 +96,28 @@ class ExtraSource(ABC):
         """Block until the extra source finished for ``client_id`` and then return the item."""
         done = self.client_done.setdefault(client_id, Done())
 
-        is_ready = done._is_done(block=True, timeout=timeout)
-        if not is_ready:
+        result_event = threading.Event()
+        result: list[Any] = []
+
+        def _capture_result(*, client_id: ClientId, item_id: str) -> None:
+            result.append(self.get_item(client_id, item_id))
+            result_event.set()
+
+        done.when_done(
+            name=f"get_item_when_done_{self.name}_{client_id}_{item_id}",
+            callback=_capture_result,
+            client_id=client_id,
+            item_id=item_id,
+            timeout=timeout,
+        )
+
+        if not result_event.wait(timeout=timeout):
             logger.warning(
                 "Extra source %s timed out waiting for client %s before retrieving %s",
                 self.name,
                 client_id,
                 item_id,
             )
+            return self.get_item(client_id, item_id)
 
-        return self.get_item(client_id, item_id)
+        return result[0]

@@ -1,10 +1,12 @@
 import logging
 import os
 from middleware_config import MiddlewareConfig
-from workers.aggregator.extra_source.done import Done
 from workers.aggregator.extra_source.extra_source import ExtraSource
 
 logger = logging.getLogger(__name__)
+
+UserId = str
+Birthday = str
     
 class ClientsExtraSource(ExtraSource):
     def __init__(self, middleware_config: MiddlewareConfig):
