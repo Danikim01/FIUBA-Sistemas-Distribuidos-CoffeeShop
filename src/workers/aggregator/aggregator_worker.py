@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict
 
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
 from message_utils import is_eof_message
-from workers.utils.base_worker import BaseWorker
+from workers.base_worker import BaseWorker
 
 
 logger = logging.getLogger(__name__)

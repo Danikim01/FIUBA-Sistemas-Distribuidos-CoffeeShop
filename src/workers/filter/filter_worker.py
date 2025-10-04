@@ -3,7 +3,7 @@
 from abc import abstractmethod
 from typing import Any, List
 
-from workers.utils.base_worker import BaseWorker
+from workers.base_worker import BaseWorker
 
 
 class FilterWorker(BaseWorker):

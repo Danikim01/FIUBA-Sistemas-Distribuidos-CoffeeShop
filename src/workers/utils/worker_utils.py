@@ -4,10 +4,8 @@ import sys
 import logging
 from typing import Any, Optional
 from datetime import datetime
-from middleware_config import MiddlewareConfig
 
 logger = logging.getLogger(__name__)
-
 
 def run_main(worker_class, *args, **kwargs):
     try:
@@ -149,3 +147,41 @@ def truncate_string(text: str, max_length: int, suffix: str = "...") -> str:
         return suffix[:max_length]
     
     return text[:max_length - len(suffix)] + suffix
+
+def extract_year_half(created_at: Any) -> str | None:
+    if not created_at:
+        return None
+
+    if isinstance(created_at, str):
+        try:
+            dt = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            try:
+                dt = datetime.fromisoformat(created_at)
+            except ValueError:
+                return None
+    else:
+        try:
+            dt = datetime.fromisoformat(str(created_at))
+        except ValueError:
+            return None
+
+    half = '1' if dt.month <= 6 else '2'
+    return f"{dt.year}-H{half}"
+
+def extract_year_month(created_at: Any) -> str | None:
+    if not created_at:
+        return None
+
+    if isinstance(created_at, str):
+        try:
+            dt = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            return created_at[:7] if len(created_at) >= 7 else None
+    else:
+        try:
+            dt = datetime.fromisoformat(str(created_at))
+        except ValueError:
+            return None
+
+    return dt.strftime('%Y-%m')

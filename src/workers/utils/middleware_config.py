@@ -18,7 +18,9 @@ class MiddlewareConfig:
         """
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.rabbitmq_port = int(os.getenv('RABBITMQ_PORT', '5672'))
+
         self.input_queue = os.getenv('INPUT_QUEUE', '').strip()
+        self.input_exchange = os.getenv('INPUT_EXCHANGE', '').strip()
 
         self.output_exchange = os.getenv('OUTPUT_EXCHANGE', '').strip()
         self.output_queue = os.getenv('OUTPUT_QUEUE', '').strip()
@@ -26,7 +28,16 @@ class MiddlewareConfig:
         self.prefetch_count = int(os.getenv('PREFETCH_COUNT', '10'))
 
         
-    def get_input_queue(self) -> RabbitMQMiddlewareQueue:
+    def get_input_middleware(self) -> Union[RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue]:
+        if self.has_input_exchange():
+            return RabbitMQMiddlewareExchange(
+                host=self.rabbitmq_host,
+                exchange_name=self.input_exchange,
+                route_keys=[self.input_exchange],
+                exchange_type='direct',
+                port=self.rabbitmq_port
+            )
+        
         return RabbitMQMiddlewareQueue(
             host=self.rabbitmq_host,
             queue_name=self.input_queue,
@@ -39,8 +50,8 @@ class MiddlewareConfig:
             return RabbitMQMiddlewareExchange(
                 host=self.rabbitmq_host,
                 exchange_name=self.output_exchange,
-                route_keys=[],  # Not needed for fanout
-                exchange_type='fanout',
+                route_keys=[self.output_exchange],
+                exchange_type='direct',
                 port=self.rabbitmq_port
             )
         
@@ -50,23 +61,19 @@ class MiddlewareConfig:
                 port=self.rabbitmq_port
             )
     
-    def has_output_exchange(self) -> bool:
-        """Check if output exchange is configured.
-        
-        Returns:
-            True if output exchange is configured
-        """
-        return self.output_exchange is not None and self.output_exchange != ''
+    def get_input_target(self) -> str:
+        if self.has_input_exchange():
+            return f"exchange:{self.input_exchange}"
+        return f"queue:{self.input_queue}"
     
     def get_output_target(self) -> str:
-        """Get the output target name for logging.
-        
-        Returns:
-            String describing the output target
-        """
-        if self.output_exchange:
+        if self.has_output_exchange():
             return f"exchange:{self.output_exchange}"
-        elif self.output_queue:
-            return f"queue:{self.output_queue}"
-        else:
-            return "None"
+        return f"queue:{self.output_queue}"
+
+    def has_input_exchange(self) -> bool:
+        return self.input_exchange != ''
+    
+    def has_output_exchange(self) -> bool:
+        return self.output_exchange != ''
+    

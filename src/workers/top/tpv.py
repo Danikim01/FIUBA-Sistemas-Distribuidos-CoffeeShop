@@ -3,11 +3,10 @@
 """TPV worker that aggregates semester totals per store."""
 
 import logging
-import os
 from collections import defaultdict
 from datetime import datetime
 from typing import Any, DefaultDict, Dict
-from worker_utils import run_main, safe_float_conversion, safe_int_conversion
+from worker_utils import extract_year_half, run_main, safe_float_conversion, safe_int_conversion
 from workers.top.top_worker import TopWorker
 
 logging.basicConfig(level=logging.INFO)
@@ -24,34 +23,9 @@ class TPVWorker(TopWorker):
 
         logger.info("TPVWorker initialized")
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _extract_year_half(created_at: Any) -> str | None:
-        if not created_at:
-            return None
-
-        if isinstance(created_at, str):
-            try:
-                dt = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
-            except ValueError:
-                try:
-                    dt = datetime.fromisoformat(created_at)
-                except ValueError:
-                    return None
-        else:
-            try:
-                dt = datetime.fromisoformat(str(created_at))
-            except ValueError:
-                return None
-
-        half = '1' if dt.month <= 6 else '2'
-        return f"{dt.year}-H{half}"
 
     def _accumulate_transaction(self, client_id: str, payload: Dict[str, Any]) -> None:
-        year_half = self._extract_year_half(payload.get('created_at'))
+        year_half = extract_year_half(payload.get('created_at'))
         if not year_half:
             return
 
@@ -71,43 +45,8 @@ class TPVWorker(TopWorker):
         bucket = self._tpv_totals[client_id][year_half]
         bucket[store_id] += amount
 
-    # ------------------------------------------------------------------
-    # BaseWorker overrides
-    # ------------------------------------------------------------------
-
-    def process_message(self, message: Any):
-        if not isinstance(message, dict):
-            logger.debug("Ignoring non-dict payload: %s", type(message))
-            return
-
-        client_id = self.current_client_id or ''
-        if not client_id:
-            logger.warning("Transaction received without client metadata")
-            return
-
-        self._accumulate_transaction(client_id, message)
-
-    def process_batch(self, batch: Any):
-        client_id = self.current_client_id or ''
-        if not client_id:
-            logger.warning("Batch received without client metadata")
-            return
-
-        for entry in batch:
-            if isinstance(entry, dict):
-                self._accumulate_transaction(client_id, entry)
-
-    # ------------------------------------------------------------------
-    # Result emission
-    # ------------------------------------------------------------------
-
-    def handle_eof(self, message: Dict[str, Any]):
-        client_id = message.get('client_id') or self.current_client_id
-        if not client_id:
-            logger.warning("EOF received without client_id in TPVWorker")
-            return
-
-        totals = self._tpv_totals.pop(client_id, {})
+    def create_payload(self, client_id: str) -> Dict[str, Any]:
+        totals = self._tpv_totals.get(client_id, {})
         results: list[Dict[str, Any]] = []
 
         for year_half, stores in totals.items():
@@ -127,15 +66,9 @@ class TPVWorker(TopWorker):
             'results': results,
         }
 
-        self.send_message(payload, client_id=client_id)
-        logger.info(
-            "TPVWorker emitted %s rows for client %s",
-            len(results),
-            client_id,
-        )
+        return payload
 
-        self.send_eof(client_id=client_id, additional_data={'source': 'tpv'})
-        self.reset_client(client_id)
+ 
 
 if __name__ == '__main__':
     run_main(TPVWorker)

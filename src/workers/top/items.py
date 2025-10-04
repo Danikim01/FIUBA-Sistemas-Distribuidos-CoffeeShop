@@ -5,9 +5,8 @@
 import logging
 import os
 from collections import defaultdict
-from datetime import datetime
 from typing import Any, DefaultDict, Dict
-from worker_utils import run_main, safe_float_conversion, safe_int_conversion
+from worker_utils import extract_year_month, run_main, safe_float_conversion, safe_int_conversion
 from workers.top.top_worker import TopWorker
 
 
@@ -30,30 +29,8 @@ class TopItemsWorker(TopWorker):
 
         logger.info("TopItemsWorker configured with top_per_month=%s", self.top_per_month)
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _extract_year_month(created_at: Any) -> str | None:
-        if not created_at:
-            return None
-
-        if isinstance(created_at, str):
-            try:
-                dt = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
-            except ValueError:
-                return created_at[:7] if len(created_at) >= 7 else None
-        else:
-            try:
-                dt = datetime.fromisoformat(str(created_at))
-            except ValueError:
-                return None
-
-        return dt.strftime('%Y-%m')
-
     def _accumulate_transaction(self, client_id: str, payload: Dict[str, Any]) -> None:
-        year_month = self._extract_year_month(payload.get('created_at'))
+        year_month = extract_year_month(payload.get('created_at'))
         if not year_month:
             return
 
@@ -63,50 +40,14 @@ class TopItemsWorker(TopWorker):
             logger.debug("Transaction item without valid item_id: %s", payload)
             return
 
-        if item_id <= 0:
-            return
-
         quantity = safe_int_conversion(payload.get('quantity'), 0)
         subtotal = safe_float_conversion(payload.get('subtotal'), 0.0)
-
-        if quantity < 0:
-            quantity = 0
 
         qty_bucket = self._quantity_totals[client_id][year_month]
         qty_bucket[item_id] += quantity
 
         profit_bucket = self._profit_totals[client_id][year_month]
         profit_bucket[item_id] += subtotal
-
-    # ------------------------------------------------------------------
-    # BaseWorker overrides
-    # ------------------------------------------------------------------
-
-    def process_message(self, message: Any):
-        if not isinstance(message, dict):
-            logger.debug("Ignoring non-dict payload: %s", type(message))
-            return
-
-        client_id = self.current_client_id or ''
-        if not client_id:
-            logger.warning("Transaction received without client metadata")
-            return
-
-        self._accumulate_transaction(client_id, message)
-
-    def process_batch(self, batch: Any):
-        client_id = self.current_client_id or ''
-        if not client_id:
-            logger.warning("Batch received without client metadata")
-            return
-
-        for entry in batch:
-            if isinstance(entry, dict):
-                self._accumulate_transaction(client_id, entry)
-
-    # ------------------------------------------------------------------
-    # Result emission
-    # ------------------------------------------------------------------
 
     def _build_results(self, totals: Dict[str, Dict[int, float]], metric_key: str) -> list[Dict[str, Any]]:
         results: list[Dict[str, Any]] = []
@@ -130,12 +71,7 @@ class TopItemsWorker(TopWorker):
         )
         return results
 
-    def handle_eof(self, message: Dict[str, Any]):
-        client_id = message.get('client_id') or self.current_client_id
-        if not client_id:
-            logger.warning("EOF received without client_id in TopItemsWorker")
-            return
-
+    def create_payload(self, client_id: str) -> Dict[str, Any]:
         quantity_totals = self._quantity_totals.pop(client_id, {})
         profit_totals = self._profit_totals.pop(client_id, {})
 
@@ -148,16 +84,7 @@ class TopItemsWorker(TopWorker):
             'profit': profit_results,
         }
 
-        self.send_message(payload, client_id=client_id)
-        logger.info(
-            "TopItemsWorker emitted %s quantity rows and %s profit rows for client %s",
-            len(quantity_results),
-            len(profit_results),
-            client_id,
-        )
-
-        self.send_eof(client_id=client_id, additional_data={'source': 'top_items'})
-        self.reset_client(client_id)
+        return payload
 
 if __name__ == '__main__':
     run_main(TopItemsWorker)

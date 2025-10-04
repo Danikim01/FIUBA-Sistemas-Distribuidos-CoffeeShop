@@ -1,8 +1,9 @@
 """Shared utilities for top aggregation workers."""
 
-from collections import defaultdict
-from typing import Any, Callable, DefaultDict, Dict, TypeVar
-from workers.utils.base_worker import BaseWorker
+from abc import abstractmethod
+from asyncio.log import logger
+from typing import Any, Dict, TypeVar
+from workers.base_worker import BaseWorker
 
 StateDict = Dict[str, Any]
 T = TypeVar("T")
@@ -10,24 +11,50 @@ T = TypeVar("T")
 class TopWorker(BaseWorker):
     """Base class for single-source top workers with per-client state helpers."""
 
-    def __init__(self) -> None:
-        super().__init__()
-        self._client_state: DefaultDict[str, StateDict] = defaultdict(dict)
+    @abstractmethod
+    def _accumulate_transaction(self, client_id: str, payload: Dict[str, Any]) -> None:
+        """Accumulate data from a single transaction payload."""
+        pass
 
-    def get_state_bucket(self, client_id: str) -> StateDict:
-        """Return (and create) the mutable state dictionary for a client."""
+    @abstractmethod
+    def create_payload(self, client_id: str) -> Dict[str, Any]:
+        """Create the payload for the output message."""
+        pass
 
-        return self._client_state.setdefault(client_id, {})
+    def handle_eof(self, message: Dict[str, Any]):
+        client_id = message.get('client_id') or self.current_client_id
+        if not client_id:
+            logger.warning("EOF received without client_id")
+            return
+        
+        payload = self.create_payload(client_id)
+        self.send_message(payload, client_id=client_id)
+        logger.info(
+            "%s emitted results for client %s",
+            self.__class__.__name__,
+            client_id,
+        )
 
-    def get_or_create(self, client_id: str, key: str, factory: Callable[[], T]) -> T:
-        """Return a state entry creating it with ``factory`` when absent."""
+        self.send_eof(client_id=client_id, additional_data={'source': 'tpv'})
 
-        bucket = self.get_state_bucket(client_id)
-        if key not in bucket:
-            bucket[key] = factory()
-        return bucket[key]
+    def process_message(self, message: Any):
+        if not isinstance(message, dict):
+            logger.debug("Ignoring non-dict payload: %s", type(message))
+            return
+        
+        client_id = self.current_client_id or ''
+        if not client_id:
+            logger.warning("Transaction received without client metadata")
+            return
 
-    def reset_client(self, client_id: str) -> None:
-        """Remove cached state for ``client_id`` after emitting results."""
+        self._accumulate_transaction(client_id, message)
 
-        self._client_state.pop(client_id, None)
+    def process_batch(self, batch: Any):
+        client_id = self.current_client_id or ''
+        if not client_id:
+            logger.warning("Batch received without client metadata")
+            return
+
+        for entry in batch:
+            if isinstance(entry, dict):
+                self._accumulate_transaction(client_id, entry)

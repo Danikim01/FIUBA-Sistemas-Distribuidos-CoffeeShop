@@ -1,7 +1,8 @@
 {
   "common_environment": {
     "RABBITMQ_HOST": "rabbitmq",
-    "RABBITMQ_PORT": 5672
+    "RABBITMQ_PORT": 5672,
+    "prefetch_count": 20
   },
   "service_environment": {
     "gateway": {
@@ -24,90 +25,75 @@
   },
   "workers": {
     "year_filter": {
-      "prefetch_count": 20,
-      "groups": [
-        {
-          "count": 2,
-          "environment": {
-            "INPUT_QUEUE": "transactions_raw",
-            "OUTPUT_QUEUE": "transactions_year_filtered",
-            "SECONDARY_OUTPUT_QUEUE": "transactions_filtered_by_year"
-          }
-        }
-      ]
+      "count": 2,
+      "environment": {
+        "INPUT_QUEUE": "transactions_raw",
+        "OUTPUT_EXCHANGE": "transactions_year_filtered"
+      }
+    },
+    "items_year_filter": {
+      "count": 2,
+      "environment": {
+        "INPUT_QUEUE": "transactions_items_raw",
+        "OUTPUT_QUEUE": "transaction_items_year_filtered"
+      }
     },
     "time_filter": {
-      "prefetch_count": 20,
-      "groups": [
-        {
-          "count": 2,
-          "environment": {
-            "INPUT_QUEUE": "transactions_year_filtered",
-            "OUTPUT_QUEUE": "transactions_time_filtered"
-          }
-        }
-      ]
+      "count": 2,
+      "environment": {
+        "INPUT_EXCHANGE": "transactions_year_filtered",
+        "OUTPUT_EXCHANGE": "transactions_time_filtered"
+      }
     },
     "amount_filter": {
-      "prefetch_count": 20,
-      "groups": [
-        {
-          "count": 2,
-          "environment": {
-            "INPUT_QUEUE": "transactions_time_filtered",
-            "OUTPUT_QUEUE": "gateway_results"
-          }
-        }
-      ]
+      "count": 2,
+      "environment": {
+        "INPUT_QUEUE": "transactions_time_filtered",
+        "OUTPUT_QUEUE": "gateway_results"
+      }
     },
     "tpv": {
-      "prefetch_count": 20,
-      "groups": [
-        {
-          "count": 1,
-          "environment": {
-            "INPUT_QUEUE": "transaction_time_filtered",
-            "OUTPUT_QUEUE": "tpv_partial"
-          }
-        }
-      ]
+      "count": 1,
+      "environment": {
+        "INPUT_QUEUE": "transaction_time_filtered",
+        "OUTPUT_QUEUE": "tpv_partial"
+      }
+    },
+    "tpv_aggregator": {
+      "count": 1,
+      "environment": {
+        "INPUT_QUEUE": "tpv_partial",
+        "OUTPUT_QUEUE": "gateway_results"
+      }
     },
     "items_top": {
-      "prefetch_count": 20,
-      "groups": [
-        {
-          "count": 1,
-          "environment": {
-            "INPUT_QUEUE": "transaction_items_raw",
-            "OUTPUT_QUEUE": "top_items_partial"
-          }
-        }
-      ]
+      "count": 1,
+      "environment": {
+        "INPUT_QUEUE": "transaction_items_raw",
+        "OUTPUT_QUEUE": "top_items_partial"
+      }
+    },
+    "items_aggregator": {
+      "count": 1,
+      "environment": {
+        "INPUT_QUEUE": "top_items_partial",
+        "OUTPUT_QUEUE": "gateway_results"
+      }
     },
     "top_clients": {
-      "prefetch_count": 20,
-      "groups": [
-        {
-          "count": 1,
-          "environment": {
-            "INPUT_QUEUE": "transactions_filtered_by_year",
-            "OUTPUT_QUEUE": "top_clients_partial"
-          }
-        }
-      ]
+      "count": 1,
+      "environment": {
+        "INPUT_EXCHANGE": "transactions_year_filtered",
+        "OUTPUT_QUEUE": "top_clients_partial"
+      }
     },
     "top_clients_birthdays": {
-      "prefetch_count": 20,
-      "groups": [
-        {
-          "count": 1,
-          "environment": {
-            "INPUT_QUEUE": "top_clients_partial",
-            "CLIENT_DATA_QUEUE": "client_data_raw",
-            "OUTPUT_QUEUE": "gateway_results"
-          }
-        }
-      ]
+      "count": 1,
+      "environment": {
+        "INPUT_QUEUE": "top_clients_partial",
+        "CLIENT_DATA_QUEUE": "client_data_raw",
+        "OUTPUT_QUEUE": "gateway_results"
+      }
     }
   }
 }

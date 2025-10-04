@@ -4,8 +4,6 @@ import logging
 import signal
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
-
-from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue, RabbitMQMiddlewareExchange
 from middleware_config import MiddlewareConfig
 from message_utils import (
     is_eof_message,
@@ -16,7 +14,6 @@ from message_utils import (
 
 logger = logging.getLogger(__name__)
 
-
 class BaseWorker(ABC):
     """Base class for all workers providing common functionality.
     
@@ -26,7 +23,6 @@ class BaseWorker(ABC):
     def __init__(self):
         """Initialize base worker.
         """
-        config = MiddlewareConfig()
 
         self.shutdown_requested = False
         self.current_client_id = ''  # Track current client being processed
@@ -34,17 +30,15 @@ class BaseWorker(ABC):
         # Configure SIGTERM handling
         signal.signal(signal.SIGTERM, self._handle_sigterm)
         
-        # Setup input middleware
-        self.input_middleware = config.get_input_queue()
-        self.output_middleware = config.get_output_middleware()
-
-        self.input_middleware
+        middleware_config = MiddlewareConfig()
+        self.input_middleware = middleware_config.get_input_middleware()
+        self.output_middleware = middleware_config.get_output_middleware()
 
         logger.info(
             "%s initialized - Input: %s, Output: %s",
             self.__class__.__name__,
-            config.input_queue,
-            config.get_output_target()
+            middleware_config.get_input_target(),
+            middleware_config.get_output_target()
         )
     
     def _handle_sigterm(self, signum, frame):
