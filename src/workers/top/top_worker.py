@@ -34,7 +34,7 @@ class TopWorker(BaseWorker):
     def send_payload(self, payload: list[Dict[str, Any]], client_id: ClientId):
         """Send the payload to the output middleware."""
         type_metadata = self.gateway_type_metadata()
-        self.send_message(payload, client_id=client_id, type_metadata=type_metadata)
+        self.send_message(data=payload, type_metadata=type_metadata)
         logger.info(
             "%s emitted %s result(s) for client %s",
             self.__class__.__name__,

@@ -202,10 +202,9 @@ def render_base_services(service_env_cfg: object, base_env: Mapping[str, str]) -
             "Service 'gateway' environment",
         )
     )
-    client_env = normalize_environment(
-        service_env_map.get("client"),
-        "Service 'client' environment",
-    )
+    client_cfg = ensure_mapping(service_env_map.get("client"), "Service 'client' configuration") or {}
+    client_env = normalize_environment(client_cfg, "Service 'client' environment")
+    client_count = ensure_int(client_cfg.get("count", 1), "Client count", allow_zero=False)
 
     lines = ["services:"]
 
@@ -257,32 +256,37 @@ def render_base_services(service_env_cfg: object, base_env: Mapping[str, str]) -
     lines.append("    restart: unless-stopped")
     lines.append("")
 
-    lines.extend(
-        [
-            "  # Client Service",
-            "  client:",
+    # Generate multiple client services
+    plural = "instancias" if client_count != 1 else "instancia"
+    lines.append(f"  # Client Service ({client_count} {plural})")
+    
+    for client_index in range(1, client_count + 1):
+        service_name = f"client-{client_index}"
+        container_name = f"coffee-client-{client_index}"
+        
+        lines.extend([
+            f"  {service_name}:",
             "    build:",
             "      context: ./src/client",
             "      dockerfile: Dockerfile",
-            "    container_name: coffee-client",
+            f"    container_name: {container_name}",
             "    networks:",
             "      - middleware-network",
             "    depends_on:",
             "      - gateway",
             "      - rabbitmq",
-        ]
-    )
-    if client_env:
-        lines.append("    environment:")
-        lines.extend(format_environment(client_env, indent="      "))
-    lines.extend(
-        [
+        ])
+        
+        if client_env:
+            lines.append("    environment:")
+            lines.extend(format_environment(client_env, indent="      "))
+        
+        lines.extend([
             "    volumes:",
-            "      - ./src/client/.data:/app/.data",
+            "      - ./src/client/.data:/app/.data:ro",
             "      - ./results:/app/.results",
             "",
-        ]
-    )
+        ])
 
     return "\n".join(lines)
 

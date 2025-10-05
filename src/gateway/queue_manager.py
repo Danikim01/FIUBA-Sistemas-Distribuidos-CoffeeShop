@@ -189,7 +189,7 @@ class QueueManager:
                 self.transactions_queue.send(message_with_metadata)
                 logger.debug(f"Sent chunk {i+1}/{len(chunks)} with {len(chunk)} transactions for client {client_id}")
             
-            logger.info(f"Sent {len(chunks)} chunks with {len(transactions)} total transactions for client {client_id}")
+            logger.debug(f"Sent {len(chunks)} chunks with {len(transactions)} total transactions for client {client_id}")
         except Exception as e:
             logger.error(f"Error sending transaction chunks to RabbitMQ for client {client_id}: {e}")
             raise

@@ -28,10 +28,9 @@ class StoresExtraSource(ExtraSource):
                 self.save_message(item)
 
         if isinstance(data, dict):
-            store_id = data.get('store_id', data.get('id', ''))
-            store_name = data.get('store_name', data.get('name', '')).strip()
-            if store_id and store_name:
-                self.data[self.current_client_id][store_id] = store_name
+            store_id = data.get('store_id', '').strip()
+            store_name = data.get('store_name', '').strip()
+            self.data[self.current_client_id][store_id] = store_name
 
     def _get_item(self, client_id: ClientId, item_id: str) -> StoreName:
         """Retrieve item from the extra source.
