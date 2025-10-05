@@ -18,27 +18,8 @@ class ExtraSource(ABC):
         """
         self.name = name
         self.middleware = middleware
-        self.client_done: dict[ClientId, Done] = {}
+        self.clients_done = Done()
         self.consuming_thread = threading.Thread(target=self._start_consuming, daemon=True)
-
-    def is_done(self, client_id: ClientId, block: bool = False, timeout: float | None = None) -> bool:
-        """Check or wait for the extra source to finish processing for a specific client.
-        
-        Args:
-            client_id: The client ID to check
-            block: If True, block until done (or until timeout if provided).
-            timeout: Optional maximum seconds to wait when block=True.
-        Returns:
-            True if done (or became done within the timeout), otherwise False.
-        """
-        if client_id not in self.client_done:
-            self.client_done[client_id] = Done()
-        return self.client_done[client_id].is_done(block=block, timeout=timeout)
-
-    def _set_done(self, client_id: ClientId):
-        if client_id not in self.client_done:
-            self.client_done[client_id] = Done()
-        self.client_done[client_id].set_done()
         
     def close(self):
         """Close the middleware connection."""
@@ -54,19 +35,14 @@ class ExtraSource(ABC):
             if client_id is None or client_id == '':
                 logger.warning(f"Message without client_id received from extra source {self.name}, ignoring: {message}")
                 return
-            
-            if client_id not in self.client_done:
-                self.client_done[client_id] = Done()
 
-            done = self.client_done[client_id]
-
-            if done.is_done():
+            if self.clients_done.is_client_done(client_id):
                 logger.info(f"Extra source {self.name} already done, ignoring message")
                 return
             
             if is_eof_message(message):
                 logger.info(f"EOF received from extra source {self.name}")
-                done.set_done()
+                self.clients_done.set_done(client_id)
                 return
 
             self.save_message(message)
@@ -99,7 +75,7 @@ class ExtraSource(ABC):
         client_id: ClientId,
         item_id: str,
     ) -> str:
-        if self.is_done(client_id, block=True, timeout=10.0):
+        if self.clients_done.is_client_done(client_id, block=True, timeout=10.0):
             return self._get_item(client_id, item_id)
         logger.warning(
             "Timed out waiting for extra source %s to finish for client %s before retrieving %s",

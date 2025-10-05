@@ -27,6 +27,7 @@ class TopWorker(BaseWorker):
         """Reset the internal state for a given client."""
         pass
 
+    # @overwrite
     def handle_eof(self, message: Dict[str, Any]):
         client_id = message.get('client_id', self.current_client_id)
 

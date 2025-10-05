@@ -92,6 +92,12 @@ class TopClientsBirthdaysAggregator(TopWorker):
             )
         )
 
+        logger.info(
+            "%s aggregated %d unique client(s) for client %s",
+            self.__class__.__name__,
+            results,
+            client_id,
+        )
         return results
 
 

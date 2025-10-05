@@ -93,7 +93,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
     "top_clients": {
         "display_name": "Top Clients Workers",
         "base_service_name": "top-clients-worker",
-        "command": ["python", "top/clients.py"],
+        "command": ["python", "top/users.py"],
         "needs_worker_id": True,
         "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": True,
@@ -101,7 +101,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
     "top_clients_birthdays": {
         "display_name": "Top Clients Birthdays Aggregator",
         "base_service_name": "top-clients-birthdays-aggregator",
-        "command": ["python", "aggregator/birthdays.py"],
+        "command": ["python", "aggregator/final_users.py"],
         "needs_worker_id": False,
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": False,
