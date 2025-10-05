@@ -7,18 +7,18 @@ import os
 from typing import Any
 from worker_utils import run_main
 from workers.aggregator.extra_source.stores import StoresExtraSource
-from workers.base_worker import BaseWorker
+from workers.top.top_worker import TopWorker
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class TopClientsBirthdaysAggregator(BaseWorker):
+class TopClientsBirthdaysAggregator(TopWorker):
     """Aggregates top-client partials and injects client birthdays."""
 
     def __init__(self) -> None:
         super().__init__()
         self.stores_source = StoresExtraSource(self.middleware_config)
-        self.stores_source.start_consuming()
+        self.stores_source._start_consuming()
 
 
         self.recieved_payloads = []

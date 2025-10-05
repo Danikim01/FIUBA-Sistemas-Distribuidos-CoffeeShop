@@ -32,12 +32,12 @@ class ExtraSource(ABC):
         """
         if client_id not in self.client_done:
             self.client_done[client_id] = Done()
-        return self.client_done[client_id]._is_done(block=block, timeout=timeout)
+        return self.client_done[client_id].is_done(block=block, timeout=timeout)
 
     def _set_done(self, client_id: ClientId):
         if client_id not in self.client_done:
             self.client_done[client_id] = Done()
-        self.client_done[client_id]._set_done()
+        self.client_done[client_id].set_done()
         
     def close(self):
         """Close the middleware connection."""
@@ -57,13 +57,13 @@ class ExtraSource(ABC):
 
             done = self.client_done[client_id]
 
-            if done._is_done():
+            if done.is_done():
                 logger.info(f"Extra source {self.name} already done, ignoring message")
                 return
             
             if is_eof_message(message):
                 logger.info(f"EOF received from extra source {self.name}")
-                done._set_done()
+                done.set_done()
                 return
 
             self.save_message(message)
@@ -80,8 +80,18 @@ class ExtraSource(ABC):
         Args:
             message: The message to handle
         """
-        pass
-
+        raise NotImplementedError
+    
     @abstractmethod
-    def get_item(self, client_id: ClientId, item_id: str) -> Any:
-        pass
+    def _get_item(self, client_id: ClientId, item_id: str) -> str:
+        raise NotImplementedError
+    
+    def get_item(self, client_id: ClientId, item_id: str) -> str:
+        """Retrieve item from the extra source.
+        Returns a dict or None if out of range.
+        """
+        logger.info(f"Getting item {item_id} for client {client_id} from extra source {self.name}")
+        if self.is_done(client_id, block=True, timeout=10.0):
+            return self._get_item(client_id, item_id)
+        logger.warning(f"Attempted to get item {item_id} for client {client_id} before extra source {self.name} was done")
+        return 'Timeout - Not Ready'

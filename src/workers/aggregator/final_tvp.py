@@ -19,12 +19,7 @@ class TPVAggregator(TopWorker):
     def __init__(self) -> None:
         super().__init__()
         self.stores_source = StoresExtraSource(self.middleware_config)
-        self._stores_thread = threading.Thread(
-            target=self.stores_source.start_consuming,
-            name="stores-extra-source",
-            daemon=True,   
-        )
-        self._stores_thread.start()
+        self.stores_source.start_consuming()
         self.recieved_payloads: Dict[ClientId, Dict[StoreId, List[StoreData]]] = {}
 
     def reset_state(self, client_id: ClientId) -> None:
@@ -42,10 +37,7 @@ class TPVAggregator(TopWorker):
             .setdefault(store_id, [])\
             .append(entry)
 
-    def _get_store_name(self, client_id: ClientId, store_id: StoreId) -> str:
-        """Resolve store name from the extra source; fall back to 'Unknown'."""
-        while not self.stores_source.is_done(client_id):
-            pass  # Wait until the stores source is done for this client
+    def get_store_name(self, client_id: ClientId, store_id: StoreId) -> str:
         return self.stores_source.get_item(client_id, store_id)
 
     def _aggregate_payloads(
@@ -70,7 +62,7 @@ class TPVAggregator(TopWorker):
                 "year_half_created_at": year_half,
                 "store_id": store_id,
                 "tpv": float(tpv_sum),
-                "store_name": self._get_store_name(client_id, store_id),
+                "store_name": self.get_store_name(client_id, store_id),
             }
             rows.append(normalize_tpv_entry(entry))
 

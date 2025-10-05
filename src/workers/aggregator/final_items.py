@@ -44,6 +44,7 @@ class FinalItemsAggregator(TopWorker):
         self._profit_totals = defaultdict(_new_profit_totals)
 
         self.menu_items_source = MenuItemsExtraSource(self.middleware_config)
+        self.menu_items_source.start_consuming()
 
         logger.info(
             "%s configured with top_per_month=%s",
@@ -142,6 +143,7 @@ class FinalItemsAggregator(TopWorker):
                 ym_bucket[iid] += profit
 
     def _accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
+        logger.info(f"FinalItemsAggregator received payload: {payload}")
         # Prefer exact totals if provided by replicas
         if 'quantity_totals' in payload or 'profit_totals' in payload:
             self._merge_quantity_totals_map(client_id, payload.get('quantity_totals'))
@@ -153,8 +155,6 @@ class FinalItemsAggregator(TopWorker):
         self._merge_profit_entries(client_id, payload.get('profit'))
 
     def get_item_name(self, clientId: ClientId, item_id: ItemId) -> str:
-        while not self.menu_items_source.is_done(clientId):
-            pass  # Wait until the menu items source is done
         return self.menu_items_source.get_item(clientId, str(item_id))
 
     def _build_results(

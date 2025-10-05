@@ -50,7 +50,7 @@ class ClientsExtraSource(ExtraSource):
             if user_id and birthday:
                 self.data[client_id][user_id] = birthday
 
-    def get_item(self, client_id: ClientId, item_id: str) -> Birthday:
+    def _get_item(self, client_id: ClientId, item_id: str) -> Birthday:
         """Retrieve item from the extra source.
         Returns a dict or None if out of range.
         """

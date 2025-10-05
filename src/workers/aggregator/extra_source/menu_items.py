@@ -24,12 +24,13 @@ class MenuItemsExtraSource(ExtraSource):
         Args:
         """ 
         menu_items_queue = os.getenv('MENU_ITEMS_QUEUE', 'menu_items_raw').strip()
-        middleware = middleware_config.create_exchange(menu_items_queue)
+        middleware = middleware_config.create_queue(menu_items_queue)
         super().__init__(menu_items_queue, middleware)
         self.data: dict[ClientId, list[_MenuItem]] = {}
     
     def save_message(self, message: dict):
         """Save the message to disk or process it as needed."""
+        logger.info(f"MenuItemsExtraSource received message: {message}")
         client_id = message.get('client_id')
         if client_id is None:
             return  
@@ -47,7 +48,7 @@ class MenuItemsExtraSource(ExtraSource):
             self.data[client_id].append(_MenuItem(data))  
         
 
-    def get_item(self, client_id: ClientId, item_id: str) -> ItemName:
+    def _get_item(self, client_id: ClientId, item_id: str) -> ItemName:
         """Retrieve item from the extra source.
         Returns a dict or None if out of range.
         """
