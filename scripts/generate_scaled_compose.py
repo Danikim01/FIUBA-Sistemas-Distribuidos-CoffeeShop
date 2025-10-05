@@ -47,7 +47,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "base_service_name": "time-filter-worker",
         "command": ["python", "filter/time.py"],
         "needs_worker_id": True,
-        "required_environment": ["INPUT_EXCHANGE", "OUTPUT_EXCHANGE"],
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_EXCHANGE"],
         "scalable": True,
     },
     "amount_filter": {
@@ -95,7 +95,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "base_service_name": "top-clients-worker",
         "command": ["python", "top/clients.py"],
         "needs_worker_id": False,
-        "required_environment": ["INPUT_EXCHANGE", "OUTPUT_QUEUE"],
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": False,
     },
     "top_clients_birthdays": {

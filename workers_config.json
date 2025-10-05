@@ -42,6 +42,7 @@
       "count": 2,
       "environment": {
         "INPUT_EXCHANGE": "transactions_year_filtered",
+        "INPUT_QUEUE": "transactions_year_filtered_time",
         "OUTPUT_EXCHANGE": "transactions_time_filtered"
       }
     },
@@ -49,6 +50,7 @@
       "count": 2,
       "environment": {
         "INPUT_EXCHANGE": "transactions_time_filtered",
+        "INPUT_QUEUE": "transactions_time_filtered_amount",
         "OUTPUT_QUEUE": "gateway_results"
       }
     },
@@ -84,6 +86,7 @@
       "count": 1,
       "environment": {
         "INPUT_EXCHANGE": "transactions_year_filtered",
+        "INPUT_QUEUE": "transactions_year_filtered_top_clients",
         "OUTPUT_QUEUE": "top_clients_partial"
       }
     },

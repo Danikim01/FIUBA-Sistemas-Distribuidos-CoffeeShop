@@ -245,14 +245,18 @@ class RabbitMQMiddlewareQueue(MessageMiddleware):
 
 
 class RabbitMQMiddlewareExchange(MessageMiddleware):
-    """
-    Implementación de MessageMiddleware para comunicación por exchange.
-    Soporta comunicación 1 a 1 y 1 a N usando routing keys.
-    Mejorado con Publisher Confirms y Consumer Acknowledgements según documentación RabbitMQ.
-    """
-    
-    def __init__(self, host: str, exchange_name: str, route_keys: List[str], 
-                 exchange_type: str = 'direct', port: int = 5672):
+    """Exchange middleware supporting shared queues for competing consumers."""
+
+    def __init__(
+        self,
+        host: str,
+        exchange_name: str,
+        route_keys: List[str],
+        exchange_type: str = 'direct',
+        port: int = 5672,
+        queue_name: Optional[str] = None,
+        prefetch_count: int = 10,
+    ):
         """
         Inicializa el middleware para comunicación por exchange.
         
@@ -272,6 +276,8 @@ class RabbitMQMiddlewareExchange(MessageMiddleware):
         self.channel: Optional[Any] = None
         self.consuming = False
         self.queue_name: Optional[str] = None
+        self._queue_override = queue_name
+        self._prefetch_count = prefetch_count
         
         #logger.info(f"Inicializando RabbitMQ Exchange Middleware: {host}:{port}/{exchange_name} ({exchange_type})")
     
@@ -314,16 +320,25 @@ class RabbitMQMiddlewareExchange(MessageMiddleware):
                 durable=False
             )
             
-            # Crear una cola temporal para este consumer
-            result = self.channel.queue_declare(queue='', exclusive=True)
-            self.queue_name = result.method.queue
+            # Configurar la cola destino. Si se recibe un nombre explícito,
+            # reutilizamos esa cola para permitir competing consumers entre
+            # réplicas; en caso contrario creamos una cola temporal exclusiva.
+            shared_queue = bool(self._queue_override)
+            if shared_queue:
+                target_queue = self._queue_override or ''
+                self.channel.queue_declare(queue=target_queue, durable=False)
+            else:
+                result = self.channel.queue_declare(queue='', exclusive=True)
+                target_queue = result.method.queue
+
+            self.queue_name = target_queue
             
             # Bindear la cola al exchange
             if self.exchange_type == 'fanout':
                 # Para fanout, no se necesitan routing keys
                 self.channel.queue_bind(
                     exchange=self.exchange_name,
-                    queue=self.queue_name
+                    queue=target_queue
                 )
                 #logger.info(f"Cola '{self.queue_name}' bindeada al exchange fanout '{self.exchange_name}'")
             else:
@@ -331,7 +346,7 @@ class RabbitMQMiddlewareExchange(MessageMiddleware):
                 for route_key in self.route_keys:
                     self.channel.queue_bind(
                         exchange=self.exchange_name,
-                        queue=self.queue_name,
+                        queue=target_queue,
                         routing_key=route_key
                     )
                     #logger.info(f"Cola '{self.queue_name}' bindeada a '{route_key}'")
@@ -347,19 +362,26 @@ class RabbitMQMiddlewareExchange(MessageMiddleware):
                     
                     # Ejecutar callback del usuario
                     on_message_callback(message)
-                    
+
+                    if shared_queue:
+                        ch.basic_ack(delivery_tag=method.delivery_tag)
+
                 except ValueError as e:
-                    #logger.error(f"Error deserializando mensaje: {e}")
+                    if shared_queue:
+                        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
                     raise MessageMiddlewareMessageError(f"Error deserializando mensaje: {e}")
                 except Exception as e:
-                    #logger.error(f"Error procesando mensaje: {e}")
+                    if shared_queue:
+                        ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
                     raise MessageMiddlewareMessageError(f"Error procesando mensaje: {e}")
-            
-            # Configurar el consumidor con ACK automático (más simple para Exchanges)
+
+            if shared_queue:
+                self.channel.basic_qos(prefetch_count=self._prefetch_count)
+
             self.channel.basic_consume(
-                queue=self.queue_name,
+                queue=target_queue,
                 on_message_callback=callback,
-                auto_ack=True  # ACK automático para simplificar Exchanges
+                auto_ack=not shared_queue,
             )
             
             self.consuming = True

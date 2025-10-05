@@ -1,7 +1,7 @@
 """Worker configuration management."""
 
 import os
-from typing import Union
+from typing import Optional, Union
 
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue
 
@@ -32,7 +32,12 @@ class MiddlewareConfig:
 
     def _create_input_middleware(self) -> Union[RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue]:
         if self.has_input_exchange():
-            return self.create_exchange(self.input_exchange)
+            queue_override = self.input_queue if self.input_queue else None
+            return self.create_exchange(
+                self.input_exchange,
+                queue_name=queue_override,
+                prefetch_count=self.prefetch_count,
+            )
         return self.create_queue(self.input_queue)
 
     def _create_output_middleware(self) -> Union[RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue]:
@@ -40,13 +45,21 @@ class MiddlewareConfig:
             return self.create_exchange(self.output_exchange)
         return self.create_queue(self.output_queue)
 
-    def create_exchange(self, name: str) -> RabbitMQMiddlewareExchange:
+    def create_exchange(
+        self,
+        name: str,
+        *, # Esta cosa rara hace que los siguientes argumentos sean solo por nombre
+        queue_name: Optional[str] = None,
+        prefetch_count: Optional[int] = None,
+    ) -> RabbitMQMiddlewareExchange:
         return RabbitMQMiddlewareExchange(
             host=self.rabbitmq_host,
             exchange_name=name,
             route_keys=[name],
             exchange_type='direct',
-            port=self.rabbitmq_port
+            port=self.rabbitmq_port,
+            queue_name=queue_name,
+            prefetch_count=prefetch_count if prefetch_count is not None else self.prefetch_count,
         )
 
     def create_queue(self, name: str) -> RabbitMQMiddlewareQueue:
