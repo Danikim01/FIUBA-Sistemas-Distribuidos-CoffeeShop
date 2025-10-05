@@ -1,11 +1,10 @@
-import json
 import os
-from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 from message_utils import ClientId
 from middleware_config import MiddlewareConfig
 from workers.extra_source.extra_source import ExtraSource
+from utils.file_utils import DiskJSONStore
 
 UserId = str
 Birthday = str
@@ -13,50 +12,39 @@ Birthday = str
 id_column = "user_id"
 birthday_column = "birthdate"
 
-
 class UsersExtraSource(ExtraSource):
+    """Stores {user_id: birthdate} per client, backed by JSON on disk."""
+
     def __init__(self, middleware_config: MiddlewareConfig):
         clients_queue = os.getenv("CLIENTS_QUEUE", "users_raw").strip()
         middleware = middleware_config.create_queue(clients_queue)
         super().__init__(clients_queue, middleware)
 
-        # Directory where client files will be stored
         base_dir = os.getenv("EXTRA_SOURCE_DIR", "./extra_source/users").strip()
-        self.base_path = Path(base_dir)
-        self.base_path.mkdir(parents=True, exist_ok=True)
+        self.store = DiskJSONStore[Birthday](base_dir)
 
-    def _client_file(self, client_id: ClientId) -> Path:
-        return self.base_path / f"{client_id}.json"
+    def save_message(self, data: dict | list):
+        """Append user_id→birthdate pairs from incoming data."""
+        client_id = self.current_client_id
+        if not client_id:
+            return
 
-    def _load(self, client_id: ClientId) -> Dict[UserId, Birthday]:
-        path = self._client_file(client_id)
-        if path.exists():
-            with path.open("r", encoding="utf-8") as f:
-                return json.load(f)
-        return {}
+        def updater(users: Dict[UserId, Birthday]):
+            def append_user(item: dict):
+                uid = item.get(id_column)
+                bday = item.get(birthday_column)
+                if self.store.valid_uuidish(uid) and bday:
+                    users[str(uid)] = str(bday)
 
-    def _save(self, client_id: ClientId, data: Dict[UserId, Birthday]) -> None:
-        with self._client_file(client_id).open("w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        append_user(item)
+            elif isinstance(data, dict):
+                append_user(data)
 
-    def save_message(self, data: dict):
-        users = self._load(self.current_client_id)
-
-        def append_user(item: dict):
-            uid = item.get(id_column)
-            bday = item.get(birthday_column)
-            if uid is not None and bday is not None:
-                users[str(uid)] = str(bday)
-
-        if isinstance(data, list):
-            for item in data:
-                append_user(item)
-
-        if isinstance(data, dict):
-            append_user(data)
-
-        self._save(self.current_client_id, users)
+        self.store.update(client_id, updater)
 
     def _get_item(self, client_id: ClientId, item_id: str) -> Birthday:
-        users = self._load(client_id)
+        users = self.store.load(client_id)
         return users.get(item_id, "Unknown Birthday")
