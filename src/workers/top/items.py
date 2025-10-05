@@ -68,7 +68,7 @@ class TopItemsWorker(TopWorker):
             ranked = sorted(
                 items_map.items(), 
                 key=lambda item: (-item[1], item[0])
-            )[:self.top_per_month]
+            )
 
             for item_id, value in ranked:
                 results.append(

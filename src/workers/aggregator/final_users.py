@@ -94,9 +94,9 @@ class TopClientsBirthdaysAggregator(TopWorker):
         for store_id, entries in grouped_results.items():
             entries.sort(
                 key=lambda row: (
-                    -int(row.get("purchases_qty", 0) or 0),
+                    row.get("store_name") or '',
+                    int(row.get("purchases_qty", 0) or 0),
                     row.get("birthdate") or '',
-                    row.get("user_id", 0),
                 )
             )
             limited_results.extend(entries[: self.top_n])

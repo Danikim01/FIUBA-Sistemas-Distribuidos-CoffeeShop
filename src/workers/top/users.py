@@ -46,7 +46,7 @@ class TopClientsWorker(TopWorker):
             ranked = sorted(
                 user_counts.items(),
                 key=lambda item: (-item[1], item[0]),
-            )[: self.top_n]
+            )
 
             for user_id, purchases_qty in ranked:
                 results.append(
