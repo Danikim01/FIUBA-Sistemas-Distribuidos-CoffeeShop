@@ -30,25 +30,28 @@ class TopWorker(BaseWorker):
     def gateway_type_metadata(self) -> dict:
         """For aggregators to override and provide type metadata."""
         return {}
-
-    # @overwrite
-    def handle_eof(self, message: Dict[str, Any]):
-        client_id = message.get('client_id', self.current_client_id)
-        self.eof_handler.handle_eof(message, client_id)
-
-        payload = self.create_payload(client_id)
-        if payload is None or len(payload) == 0:
-            return
-
-        self.reset_state(client_id)
-        self.send_message(payload, client_id=client_id, type_metadata=self.gateway_type_metadata())
+    
+    def send_payload(self, payload: list[Dict[str, Any]], client_id: ClientId):
+        """Send the payload to the output middleware."""
+        type_metadata = self.gateway_type_metadata()
+        self.send_message(payload, client_id=client_id, type_metadata=type_metadata)
         logger.info(
             "%s emitted %s result(s) for client %s",
             self.__class__.__name__,
             len(payload) if hasattr(payload, "__len__") else 0,
             client_id,
         )
+    
+    # @overwrite
+    def handle_eof(self, message: Dict[str, Any]):
+        client_id = message.get('client_id', self.current_client_id)
+
+        payload = self.create_payload(client_id)
+        if len(payload) > 0:
+            self.reset_state(client_id)
+            self.send_payload(payload, client_id)
         
+        self.eof_handler.handle_eof(message, client_id)
 
     def process_message(self, message: dict):
         client_id = self.current_client_id or message.get('client_id', '')

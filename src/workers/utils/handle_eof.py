@@ -11,9 +11,11 @@ Counter = Dict[int, int]  # [worker_id, count]
 
 class EOFHandler:
     def __init__(self, middleware_config: MiddlewareConfig):
-        self.max_retries: int = int(os.getenv('MAX_EOF_RETRIES', '5'))
         self.worker_id: int = int(os.getenv('WORKER_ID', '0'))
         self.replica_count: int = int(os.getenv('REPLICA_COUNT', '1'))
+        # self.max_retries: int = int(os.getenv('MAX_EOF_RETRIES', '5'))
+        self.max_retries: int = self.replica_count * 2
+        
         self.middleware_config = middleware_config
         self._queue_requeue_middleware: RabbitMQMiddlewareQueue = self.get_input_queue()
 

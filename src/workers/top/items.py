@@ -33,11 +33,19 @@ class TopItemsWorker(TopWorker):
 
     def __init__(self) -> None:
         super().__init__()
-        self.top_per_month = safe_int_conversion(os.getenv('TOP_ITEMS_COUNT', '1'), default=1)
+
+        self.top_per_month = self.get_top_number()
+
         self._quantity_totals: QuantityTotals = defaultdict(_new_monthly_quantity_map)
         self._profit_totals: ProfitTotals = defaultdict(_new_monthly_profit_map)
 
         logger.info("TopItemsWorker configured with top_per_month=%s", self.top_per_month)
+
+    @staticmethod
+    def get_top_number() -> int:
+        wanted_top_items = safe_int_conversion(os.getenv('TOP_ITEMS_COUNT', '1'), default=1)
+        replica_count = safe_int_conversion(os.getenv('REPLICA_COUNT', '1'), default=1)
+        return wanted_top_items * replica_count
 
     def reset_state(self, client_id: ClientId) -> None:
         self._quantity_totals[client_id] = _new_monthly_quantity_map()
@@ -48,20 +56,13 @@ class TopItemsWorker(TopWorker):
         if not year_month:
             return
 
-        try:
-            item_id = safe_int_conversion(payload.get('item_id'))
-        except Exception:  # noqa: BLE001
-            logger.debug("Transaction item without valid item_id: %s", payload)
-            return
+        item_id = safe_int_conversion(payload.get('item_id'))
 
         quantity = safe_int_conversion(payload.get('quantity'), 0)
         subtotal = safe_float_conversion(payload.get('subtotal'), 0.0)
 
-        qty_bucket = self._quantity_totals[client_id][year_month]
-        qty_bucket[item_id] += quantity
-
-        profit_bucket = self._profit_totals[client_id][year_month]
-        profit_bucket[item_id] += subtotal
+        self._quantity_totals[client_id][year_month][item_id] += quantity
+        self._profit_totals[client_id][year_month][item_id] += subtotal
 
     def _build_results(
         self,
@@ -70,8 +71,12 @@ class TopItemsWorker(TopWorker):
     ) -> list[Dict[str, Any]]:
         results: list[Dict[str, Any]] = []
         for year_month, items_map in totals.items():
-            ranked = sorted(items_map.items(), key=lambda item: (-item[1], item[0]))
-            for item_id, value in ranked[: self.top_per_month]:
+            ranked = sorted(
+                items_map.items(), 
+                key=lambda item: (-item[1], item[0])
+            )[:self.top_per_month]
+
+            for item_id, value in ranked:
                 results.append(
                     {
                         'year_month_created_at': year_month,
@@ -79,14 +84,6 @@ class TopItemsWorker(TopWorker):
                         metric_key: value,
                     }
                 )
-
-        results.sort(
-            key=lambda row: (
-                row['year_month_created_at'],
-                -row[metric_key],
-                row['item_id'],
-            )
-        )
         return results
 
     def create_payload(self, client_id: str) -> List[Dict[str, Any]]:

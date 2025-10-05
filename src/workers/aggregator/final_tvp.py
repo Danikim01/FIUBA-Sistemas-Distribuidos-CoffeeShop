@@ -6,11 +6,7 @@ from workers.top.top_worker import TopWorker
 from worker_utils import normalize_tpv_entry, safe_int_conversion, tpv_sort_key, run_main
 from workers.top.tpv import StoreId, YearHalf
 
-class StoreData:
-    def __init__(self, year_half: str, tpv: float, store_name: str = "Unknown"):
-        self.year_half = year_half
-        self.tpv = tpv
-        self.store_name = store_name
+# TPV (Total Payment Value) per each semester during 2024 and 2025, per branch, created between 06:00 AM and 11:00 PM.
 
 class TPVAggregator(TopWorker): 
     def __init__(self) -> None:
@@ -52,7 +48,7 @@ class TPVAggregator(TopWorker):
                 )
                 results.append(entry)
 
-        results.sort(key=tpv_sort_key, reverse=True)
+        results.sort(key=tpv_sort_key)
         return results
 
     def gateway_type_metadata(self) -> dict:

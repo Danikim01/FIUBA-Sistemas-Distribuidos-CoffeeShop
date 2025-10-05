@@ -14,6 +14,8 @@ from workers.top.top_worker import TopWorker
 
 logger = logging.getLogger(__name__)
 
+# Best-selling products (name and quantity) and products that generated the biggest profits (name and profit), for each month of 2024 and 2025.
+
 YearMonth = str
 ItemId = int
 ItemMetricValue = int | float

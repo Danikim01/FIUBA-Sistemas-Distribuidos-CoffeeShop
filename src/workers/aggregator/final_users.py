@@ -13,6 +13,8 @@ from workers.top.top_worker import TopWorker
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Birthday date of the 3 customers who have made the most purchases for each branch
+
 class TopClientsBirthdaysAggregator(TopWorker):
     """Aggregates top-client partials and injects client birthdays."""
 
