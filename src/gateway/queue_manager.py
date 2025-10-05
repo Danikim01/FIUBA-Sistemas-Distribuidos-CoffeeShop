@@ -1,12 +1,98 @@
 """Queue manager module for handling RabbitMQ operations."""
 
 import logging
+import queue
+import threading
 from typing import List, Any
+from contextlib import suppress
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue
 from middleware.thread_aware_publishers import ThreadAwareExchangePublisher, ThreadAwareQueuePublisher
 from config import GatewayConfig
 
 logger = logging.getLogger(__name__)
+
+class _ResultsRouter:
+    """Single-consumer router that delivers results to the correct client."""
+
+    def __init__(self, queue_factory):
+        self._queue_factory = queue_factory
+        self._buffers: dict[str, queue.Queue] = {}
+        self._lock = threading.RLock()
+        self._thread: threading.Thread | None = None
+        self._consumer: RabbitMQMiddlewareQueue | None = None
+        self._shutdown = threading.Event()
+
+    def close(self) -> None:
+        """Stop the consumer thread and close the underlying middleware."""
+        self._shutdown.set()
+        with self._lock:
+            consumer = self._consumer
+        if consumer is not None:
+            with suppress(Exception):
+                consumer.stop_consuming()
+            with suppress(Exception):
+                consumer.close()
+        if self._thread is not None:
+            self._thread.join(timeout=5.0)
+        with self._lock:
+            self._buffers.clear()
+            self._thread = None
+            self._consumer = None
+
+    def iter_client(self, client_id: str):
+        """Yield messages for the requested client, blocking until EOF arrives."""
+        buffer = self._get_buffer(client_id)
+        self._ensure_thread_started()
+        while not self._shutdown.is_set():
+            try:
+                message = buffer.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            yield message
+            if isinstance(message, dict) and str(message.get('type', '')).upper() == 'EOF':
+                break
+        self._cleanup_buffer(client_id)
+
+    def _get_buffer(self, client_id: str) -> queue.Queue:
+        with self._lock:
+            buffer = self._buffers.get(client_id)
+            if buffer is None:
+                buffer = queue.Queue()
+                self._buffers[client_id] = buffer
+            return buffer
+
+    def _cleanup_buffer(self, client_id: str) -> None:
+        with self._lock:
+            self._buffers.pop(client_id, None)
+
+    def _ensure_thread_started(self) -> None:
+        with self._lock:
+            if self._thread and self._thread.is_alive():
+                return
+            if self._shutdown.is_set():
+                return
+            consumer = self._queue_factory()
+            self._consumer = consumer
+            thread = threading.Thread(target=self._consume_loop, args=(consumer,), daemon=True)
+            self._thread = thread
+            thread.start()
+
+    def _consume_loop(self, consumer: RabbitMQMiddlewareQueue) -> None:
+        def on_message(message):
+            client_id = message.get('client_id') if isinstance(message, dict) else None
+            if not client_id:
+                logger.warning('Discarding results payload without client metadata: %s', message)
+                return
+            buffer = self._get_buffer(client_id)
+            buffer.put(message)
+
+        try:
+            consumer.start_consuming(on_message)
+        except Exception as exc:  # noqa: BLE001
+            if not self._shutdown.is_set():
+                logger.error('Results router stopped unexpectedly: %s', exc)
+
+
 
 
 class QueueManager:
@@ -68,6 +154,13 @@ class QueueManager:
         self.menu_items_queue = ThreadAwareQueuePublisher(
             lambda: RabbitMQMiddlewareQueue(
                 queue_name=self.config.menu_items_queue_name,
+                **connection_params,
+            )
+        )
+
+        self._results_router = _ResultsRouter(
+            lambda: RabbitMQMiddlewareQueue(
+                queue_name=self.config.results_queue_name,
                 **connection_params,
             )
         )
@@ -225,6 +318,10 @@ class QueueManager:
             logger.error(f"Failed to propagate EOF to transaction items queue for client {client_id}: {exc}")
             raise
     
+    def iter_client_results(self, client_id: str):
+        """Iterate over result payloads destined to the specified client."""
+        return self._results_router.iter_client(client_id)
+
     def propagate_menu_items_eof(self, client_id: str) -> None:
         """Propagate EOF message to menu items queue with client metadata."""
         try:
@@ -253,6 +350,10 @@ class QueueManager:
                 publisher.close_all()
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Error closing publisher: %s", exc)
+        try:
+            self._results_router.close()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Error closing results router: %s", exc)
 
     def create_results_consumer(self) -> RabbitMQMiddlewareQueue:
         """Create a new results queue consumer."""

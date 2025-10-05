@@ -365,4 +365,4 @@ class ResultsHandler:
         except Exception as exc:  # noqa: BLE001
             logger.error(f"Error while listening for results: {exc}")
         finally:
-            logger.info(f"Total results received: {self.query1_items_received}")
+            logger.info(f"Total query 1 results received: {self.query1_items_received}")
