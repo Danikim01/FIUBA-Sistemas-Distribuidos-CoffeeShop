@@ -7,7 +7,6 @@ from typing import Any, Dict, List
 from handle_eof import EOFHandler
 from middleware_config import MiddlewareConfig
 from message_utils import (
-    ClientId,
     extract_data_and_client_id,
     is_eof_message,
     create_message_with_metadata,
