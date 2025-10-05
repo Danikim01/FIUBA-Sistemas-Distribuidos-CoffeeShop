@@ -14,9 +14,11 @@ logger = logging.getLogger(__name__)
 class _ResultsRouter:
     """Single-consumer router that delivers results to the correct client."""
 
-    def __init__(self, queue_factory):
+    def __init__(self, queue_factory, expected_eofs: int):
         self._queue_factory = queue_factory
+        self._expected_eofs = max(1, int(expected_eofs))
         self._buffers: dict[str, queue.Queue] = {}
+        self._eof_counts: dict[str, int] = {}
         self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
         self._consumer: RabbitMQMiddlewareQueue | None = None
@@ -36,11 +38,12 @@ class _ResultsRouter:
             self._thread.join(timeout=5.0)
         with self._lock:
             self._buffers.clear()
+            self._eof_counts.clear()
             self._thread = None
             self._consumer = None
 
     def iter_client(self, client_id: str):
-        """Yield messages for the requested client, blocking until EOF arrives."""
+        """Yield messages for the requested client, blocking until all EOF markers arrive."""
         buffer = self._get_buffer(client_id)
         self._ensure_thread_started()
         while not self._shutdown.is_set():
@@ -50,8 +53,12 @@ class _ResultsRouter:
                 continue
             yield message
             if isinstance(message, dict) and str(message.get('type', '')).upper() == 'EOF':
-                break
+                count = self._eof_counts.get(client_id, 0) + 1
+                self._eof_counts[client_id] = count
+                if count >= self._expected_eofs:
+                    break
         self._cleanup_buffer(client_id)
+        self._eof_counts.pop(client_id, None)
 
     def _get_buffer(self, client_id: str) -> queue.Queue:
         with self._lock:
@@ -162,7 +169,8 @@ class QueueManager:
             lambda: RabbitMQMiddlewareQueue(
                 queue_name=self.config.results_queue_name,
                 **connection_params,
-            )
+            ),
+            expected_eofs=self.config.results_expected,
         )
     
     def send_transactions_chunks(self, transactions: List[Any], client_id: str) -> None:

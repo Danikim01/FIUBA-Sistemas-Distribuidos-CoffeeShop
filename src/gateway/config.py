@@ -26,6 +26,8 @@ class GatewayConfig:
         # Processing configuration
         self.chunk_size = int(os.getenv('CHUNK_SIZE', 100))
 
+        self.results_expected = int(os.getenv('RESULTS_EXPECTED', '4'))
+
         # Logger configuration
         self.log_level = os.getenv('LOG_LEVEL', 'DEBUG')
     
