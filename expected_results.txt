@@ -13,11 +13,11 @@
 813393	fff533da-0314-401a-8fdd-d5e7a47a6d6d	84.0
 
 year_month_created_at	item_name	    sellings_qty
-2024-01	                Latte	        311361
+2024-01	                Latte	            311361
 2025-01	                Flat White	    312232
 year_month_created_at	item_name	    profit_sum
-2024-01	                Matcha Latte	3098440.0
-2025-01	                Matcha Latte	3104830.0
+2024-01	                Matcha Latte	    3098440.0
+2025-01	                Matcha Latte	    3104830.0
 
 	year_half_created_at	store_name	                    tpv
 5	2024-H1	                G Coffee @ Alam Tun Hussein Onn	2053737.00

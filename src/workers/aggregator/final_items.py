@@ -9,7 +9,7 @@ from typing import Any, DefaultDict, Dict, List, Mapping
 
 from message_utils import ClientId
 from worker_utils import run_main, safe_int_conversion, top_items_sort_key
-from workers.aggregator.extra_source.menu_items import MenuItemsExtraSource
+from workers.extra_source.menu_items import MenuItemsExtraSource
 from workers.top.top_worker import TopWorker
 
 logger = logging.getLogger(__name__)

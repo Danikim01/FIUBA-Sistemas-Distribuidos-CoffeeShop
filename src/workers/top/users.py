@@ -8,7 +8,7 @@ from collections import defaultdict
 from typing import Any, DefaultDict, Dict
 
 from message_utils import ClientId
-from worker_utils import run_main, safe_int_conversion
+from worker_utils import get_top_number, run_main, safe_int_conversion
 from workers.top.top_worker import TopWorker
 
 
@@ -22,19 +22,13 @@ class TopClientsWorker(TopWorker):
 
     def __init__(self) -> None:
         super().__init__()
-        self.top_n = self.get_top_number()
+        self.top_n = get_top_number("TOP_CLIENTS_COUNT", default=3)
 
         self.clients_data: DefaultDict[
             ClientId, DefaultDict[int, DefaultDict[int, int]]
         ] = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
 
         logger.info("TopClientsWorker configured with top_n=%s", self.top_n)
-
-    @staticmethod
-    def get_top_number() -> int:
-        wanted_top_items = safe_int_conversion(os.getenv('TOP_USERS_COUNT', '3'), default=3)
-        replica_count = safe_int_conversion(os.getenv('REPLICA_COUNT', '1'), default=1)
-        return wanted_top_items * replica_count
 
     def reset_state(self, client_id: ClientId) -> None:
         self.clients_data[client_id] = defaultdict(lambda: defaultdict(int))

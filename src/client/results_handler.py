@@ -14,8 +14,8 @@ class ResultsHandler:
     def __init__(self) -> None:
         self.queries_expected = int(os.getenv("QUERIES_EXPECTED", "4")) # Default to 4 queries
         self.queries_completed = 0
-
         self.query1_items_received = 0
+        
         self.results_dir = Path(".results")
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -172,7 +172,6 @@ class ResultsHandler:
             body_lines.append("-" * 50)
 
         self._append_to_file(filename, body_lines, client_id)
-        self.query1_items_received += len(rows)
 
     def _render_top_clients_birthdays(self, payload: Dict[str, Any], client_id: str) -> None:
         """Persist top clients birthdays into the results folder."""
@@ -209,7 +208,6 @@ class ResultsHandler:
             body_lines.append("-" * 50)
 
         self._append_to_file("top_clients_birthdays.txt", body_lines, client_id)
-        self.query1_items_received += len(rows)
 
     def _render_tpv_summary(self, payload: Dict[str, Any], client_id: str) -> None:
         """Persist TPV summary results."""
@@ -247,7 +245,6 @@ class ResultsHandler:
         body_lines.append("-" * 50)
 
         self._append_to_file("tpv_summary.txt", body_lines, client_id)
-        self.query1_items_received += len(results)
 
     def handle_single_result(self, result: Dict[str, Any]) -> bool:
         """Process a single result message.
@@ -365,4 +362,4 @@ class ResultsHandler:
         except Exception as exc:  # noqa: BLE001
             logger.error(f"Error while listening for results: {exc}")
         finally:
-            logger.info(f"Total results received: {self.query1_items_received}")
+            logger.info(f"Total query 1 results received: {self.query1_items_received}")

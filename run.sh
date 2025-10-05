@@ -11,4 +11,4 @@ if ! [[ "$WORKER_COUNT" =~ ^[0-9]+$ ]] || [[ "$WORKER_COUNT" -le 0 ]]; then
 fi
 
 scripts/generate_scaled_compose.py --config "${CONFIG_PATH}" --output docker-compose.yml --scale "$WORKER_COUNT"
-docker compose up --build -d --force-recreate
+docker compose up --build -d --force-recreate --remove-orphans

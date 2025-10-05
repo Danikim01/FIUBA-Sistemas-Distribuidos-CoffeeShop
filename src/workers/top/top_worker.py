@@ -34,7 +34,7 @@ class TopWorker(BaseWorker):
     def send_payload(self, payload: list[Dict[str, Any]], client_id: ClientId):
         """Send the payload to the output middleware."""
         type_metadata = self.gateway_type_metadata()
-        self.send_message(payload, client_id=client_id, type_metadata=type_metadata)
+        self.send_message(data=payload, type_metadata=type_metadata)
         logger.info(
             "%s emitted %s result(s) for client %s",
             self.__class__.__name__,
@@ -42,20 +42,17 @@ class TopWorker(BaseWorker):
             client_id,
         )
     
-    # @overwrite
+    # @override
     def handle_eof(self, message: Dict[str, Any]):
-        client_id = message.get('client_id', self.current_client_id)
-
-        payload = self.create_payload(client_id)
+        payload = self.create_payload(self.current_client_id)
         if len(payload) > 0:
-            self.reset_state(client_id)
-            self.send_payload(payload, client_id)
-        
-        self.eof_handler.handle_eof(message, client_id)
+            self.reset_state(self.current_client_id)
+            self.send_payload(payload, self.current_client_id)
+
+        super().handle_eof(message)
 
     def process_message(self, message: dict):
-        client_id = message.get('client_id', self.current_client_id)
-        self.accumulate_transaction(client_id, message)
+        self.accumulate_transaction(self.current_client_id, message)
 
     def process_batch(self, batch: list):
         for entry in batch:

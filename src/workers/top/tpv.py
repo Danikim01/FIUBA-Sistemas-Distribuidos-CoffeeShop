@@ -4,7 +4,6 @@
 
 import logging
 from collections import defaultdict
-from datetime import datetime
 from typing import Any, DefaultDict, Dict
 from message_utils import ClientId
 from worker_utils import extract_year_half, run_main, safe_float_conversion, safe_int_conversion

@@ -102,7 +102,6 @@ class ClientHandler:
         """Consume results from RabbitMQ and forward them to the specific client via TCP."""
         logger.info(f"Forwarding results to client {client_id}")
 
-        results_queue = self.queue_manager.create_results_consumer()
         eof_sent = False
 
         def handle_payload(payload: Any) -> None:
@@ -110,16 +109,13 @@ class ClientHandler:
 
             logger.debug(f"Handling payload for client {client_id}: {payload}")
 
-            if (payload.get('client_id') != client_id):
-                return
-            
             if isinstance(payload, list):
                 for item in payload:
                     handle_payload(item)
                 return
 
             if self.message_handlers.is_eof_message(payload):
-                logger.info(f"Received EOF from results queue for client {client_id}; notifying client")
+                logger.info(f"Received EOF from results stream for client {client_id}; notifying client")
                 try:
                     self._send_json_line(client_socket, {'type': 'EOF', 'client_id': client_id})
                     eof_sent = True
@@ -128,6 +124,11 @@ class ClientHandler:
                 return
 
             if not isinstance(payload, dict):
+                logger.debug(
+                    "Ignoring results payload of type %s for client %s",
+                    type(payload),
+                    client_id,
+                )
                 return
 
             try:
@@ -141,32 +142,28 @@ class ClientHandler:
                     return
 
                 for result_payload in normalized_messages:
-                    result_payload = dict(result_payload)
-                    result_payload['client_id'] = client_id
+                    enriched_payload = dict(result_payload)
+                    enriched_payload['client_id'] = client_id
                     logger.debug(
                         "Gateway sending normalized result to client %s: %s",
                         client_id,
-                        result_payload,
+                        enriched_payload,
                     )
-                    self._send_json_line(client_socket, result_payload)
+                    self._send_json_line(client_socket, enriched_payload)
             except Exception as exc:
                 logger.error(f"Failed to forward result to client {client_id}: {exc}")
 
-        def on_message(message: Any) -> None:
-            try:
-                logger.debug(f"Gateway received message from results queue: {type(message)} - {message}")
-                handle_payload(message)
-            except Exception as exc:  # noqa: BLE001
-                logger.error(f"Unexpected error forwarding results for client {client_id}: {exc}")
-
         try:
-            results_queue.start_consuming(on_message)
+            for message in self.queue_manager.iter_client_results(client_id):
+                try:
+                    handle_payload(message)
+                except Exception as exc:  # noqa: BLE001
+                    logger.error(f"Unexpected error forwarding results for client {client_id}: {exc}")
         except KeyboardInterrupt:
             logger.info(f"Results forwarding interrupted for client {client_id}")
         except Exception as exc:
-            logger.error(f"Error while consuming results queue for client {client_id}: {exc}")
+            logger.error(f"Error while consuming results stream for client {client_id}: {exc}")
         finally:
-            results_queue.close()
             if not eof_sent:
                 try:
                     self._send_json_line(client_socket, {'type': 'EOF', 'client_id': client_id})

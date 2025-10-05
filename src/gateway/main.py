@@ -85,6 +85,10 @@ class CoffeeShopGateway:
         """Stop the gateway server"""
         self.running = False
         self.shutdown_event.set()
+        try:
+            self.queue_manager.close()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Error closing queue manager: %s", exc)
         if self.socket:
             self.socket.close()
             logger.info("Gateway server stopped")

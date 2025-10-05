@@ -12,10 +12,11 @@
       "USERS_QUEUE": "users_raw",
       "TRANSACTION_ITEMS_QUEUE": "transaction_items_raw",
       "MENU_ITEMS_QUEUE": "menu_items_raw",
-      "CHUNK_SIZE": 5000
+      "CHUNK_SIZE": 5000,
+      "RESULTS_EXPECTED": 4
     },
     "client": {
-      "count": 2,
+      "count": 3,
       "GATEWAY_HOST": "gateway",
       "GATEWAY_PORT": "12345",
       "BATCH_MAX_SIZE_KB": "64",
