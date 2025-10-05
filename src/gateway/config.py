@@ -29,7 +29,7 @@ class GatewayConfig:
         self.results_expected = int(os.getenv('RESULTS_EXPECTED', '4'))
 
         # Logger configuration
-        self.log_level = os.getenv('LOG_LEVEL', 'DEBUG')
+        self.log_level = os.getenv('LOG_LEVEL', 'INFO')
     
     def _parse_stores_queues(self) -> List[str]:
         """Parse and validate stores queue names from environment variables."""
