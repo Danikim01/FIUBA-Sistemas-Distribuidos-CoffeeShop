@@ -219,14 +219,14 @@ class QueueManager:
                 'data': users
             }
             self.users_queue.send(message_with_metadata)
-            logger.info("Sent %s users to queue %s for client %s", len(users), self.config.users_queue_name, client_id)
+            logger.debug("Sent %s users to queue %s for client %s", len(users), self.config.users_queue_name, client_id)
         except Exception as e:
             logger.error(f"Error sending users to RabbitMQ for client {client_id}: {e}")
             raise
     
     def send_transaction_items_chunks(self, transaction_items: List[Any], client_id: str) -> None:
         """Send transaction items in chunks to the processing queue with client metadata."""
-        logger.info(
+        logger.debug(
             "Processing %s transaction items with chunking (chunk_size=%s) for client %s",
             len(transaction_items),
             self.config.chunk_size,
