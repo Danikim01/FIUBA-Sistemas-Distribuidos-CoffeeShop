@@ -20,29 +20,18 @@ class StoresExtraSource(ExtraSource):
         super().__init__(stores_exchange, middleware)
         self.data: dict[ClientId, dict[StoreId, StoreName]] = {}
     
-    def save_message(self, message: dict):
+    def save_message(self, data: dict):
         """Save the message to disk or process it as needed."""
-        client_id = message.get('client_id')
-        if client_id is None:
-            return  
-
-        if client_id not in self.data:
-            self.data[client_id] = {}
-        
-        data = message.get('data', [])
 
         if isinstance(data, list):
             for item in data:
-                store_id = item.get('store_id', item.get('id', ''))
-                store_name = item.get('store_name', item.get('name', '')).strip()
-                if store_id and store_name:
-                    self.data[client_id][store_id] = store_name
+                self.save_message(item)
 
         if isinstance(data, dict):
             store_id = data.get('store_id', data.get('id', ''))
             store_name = data.get('store_name', data.get('name', '')).strip()
             if store_id and store_name:
-                self.data[client_id][store_id] = store_name
+                self.data[self.current_client_id][store_id] = store_name
 
     def _get_item(self, client_id: ClientId, item_id: str) -> StoreName:
         """Retrieve item from the extra source.

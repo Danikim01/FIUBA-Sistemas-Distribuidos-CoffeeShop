@@ -1,7 +1,7 @@
 import logging
 import os
 from typing import Any, Dict, cast
-from message_utils import ClientId, create_message_with_metadata, extract_eof_metadata
+from message_utils import ClientId, create_message_with_metadata, extract_data_and_client_id, extract_eof_metadata
 from middleware_config import MiddlewareConfig
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
 
@@ -29,10 +29,7 @@ class EOFHandler:
             message: EOF message dictionary
             callback: Optional callback to execute before outputting EOF
         """
-        client_id = message.get('client_id', '')
-        if client_id == '':
-            logger.error("No client_id found in EOF message")
-            return
+        client_id, message = extract_data_and_client_id(message)
 
         counter = self.get_counter(message)
 

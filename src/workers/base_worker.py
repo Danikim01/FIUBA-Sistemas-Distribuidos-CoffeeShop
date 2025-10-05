@@ -7,8 +7,9 @@ from typing import Any, Dict, List
 from handle_eof import EOFHandler
 from middleware_config import MiddlewareConfig
 from message_utils import (
+    ClientId,
+    extract_data_and_client_id,
     is_eof_message,
-    extract_client_metadata,
     create_message_with_metadata,
 )
 
@@ -27,7 +28,7 @@ class BaseWorker(ABC):
         signal.signal(signal.SIGTERM, self._handle_sigterm)
 
         self.shutdown_requested = False
-        self.current_client_id = ''  # Track current client being processed
+        self.current_client_id = ''
 
         self.middleware_config = MiddlewareConfig()
         self.eof_handler = EOFHandler(self.middleware_config)
@@ -50,17 +51,14 @@ class BaseWorker(ABC):
         self.middleware_config.input_middleware.stop_consuming()
         self.shutdown_requested = True
     
-    def send_message(self, data: Any, client_id: str = '', **metadata):
+    def send_message(self, data: Any, **metadata):
         """Send a message to the output with client metadata.
         
         Args:
             data: The actual data to send
-            client_id: Client identifier
             **metadata: Additional metadata fields
         """
-        if client_id == '':
-            client_id = self.current_client_id
-        message = create_message_with_metadata(client_id, data, **metadata)
+        message = create_message_with_metadata(self.current_client_id, data, **metadata)
         self.middleware_config.output_middleware.send(message)
     
     @abstractmethod
@@ -83,11 +81,6 @@ class BaseWorker(ABC):
 
     # overwritten by top worker
     def handle_eof(self, message: Dict[str, Any]):
-        """Handle EOF message. Can be overridden by subclasses.
-        
-        Args:
-            message: EOF message dictionary
-        """
         self.eof_handler.handle_eof(message)
 
     def start_consuming(self):
@@ -104,12 +97,12 @@ class BaseWorker(ABC):
                         logger.info("Shutdown requested, stopping message processing")
                         return
                     
+                    client_id, actual_data = extract_data_and_client_id(message)
+                    self.current_client_id = client_id
+                    
                     if is_eof_message(message):
                         self.handle_eof(message)
                         return
-                    
-                    client_id, actual_data = extract_client_metadata(message)
-                    self.current_client_id = client_id
 
                     logger.info(f"Processing message for client {client_id}")
                     
@@ -117,7 +110,7 @@ class BaseWorker(ABC):
                         self.process_batch(actual_data)
                     else:
                         self.process_message(actual_data)
-                        
+
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
 

@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import logging
 import threading
 from typing import Any
-from message_utils import ClientId, is_eof_message
+from message_utils import ClientId, extract_data_and_client_id, is_eof_message
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue
 from workers.aggregator.extra_source.done import Done
 
@@ -18,6 +18,7 @@ class ExtraSource(ABC):
         """
         self.name = name
         self.middleware = middleware
+        self.current_client_id = ''
         self.clients_done = Done()
         self.consuming_thread = threading.Thread(target=self._start_consuming, daemon=True)
         
@@ -31,10 +32,8 @@ class ExtraSource(ABC):
         """Start consuming messages from the extra source."""
 
         def on_message(message):
-            client_id = message.get('client_id')
-            if client_id is None or client_id == '':
-                logger.warning(f"Message without client_id received from extra source {self.name}, ignoring: {message}")
-                return
+            client_id, data = extract_data_and_client_id(message)
+            self.current_client_id = client_id
 
             if self.clients_done.is_client_done(client_id):
                 logger.info(f"Extra source {self.name} already done, ignoring message")
@@ -45,7 +44,7 @@ class ExtraSource(ABC):
                 self.clients_done.set_done(client_id)
                 return
 
-            self.save_message(message)
+            self.save_message(data)
 
         try:
             self.middleware.start_consuming(on_message)
@@ -58,7 +57,7 @@ class ExtraSource(ABC):
             self.consuming_thread.start()
 
     @abstractmethod
-    def save_message(self, message):
+    def save_message(self, data: dict):
         """Handle and persist a message from the extra source.
         
         Args:
