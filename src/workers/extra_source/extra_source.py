@@ -33,10 +33,6 @@ class ExtraSource(ABC):
 
         def on_message(message):
             try:
-                if not message:
-                    logger.warning(f"Empty message received from {self.name}")
-                    return
-                    
                 client_id, data = extract_data_and_client_id(message)
                 self.current_client_id = client_id
 

@@ -4,7 +4,6 @@ from typing import Dict
 from message_utils import ClientId
 from middleware_config import MiddlewareConfig
 from workers.extra_source.extra_source import ExtraSource
-from utils.file_utils import DiskJSONStore
 
 UserId = str
 Birthday = str
@@ -20,31 +19,20 @@ class UsersExtraSource(ExtraSource):
         middleware = middleware_config.create_queue(clients_queue)
         super().__init__(clients_queue, middleware)
 
-        base_dir = os.getenv("EXTRA_SOURCE_DIR", "./extra_source/users").strip()
-        self.store = DiskJSONStore[Birthday](base_dir)
+        self.data: dict[ClientId, Dict[UserId, Birthday]] = {}
 
     def save_message(self, data: dict | list):
-        """Append user_id→birthdate pairs from incoming data."""
-        client_id = self.current_client_id
-        if not client_id:
+        if isinstance(data, list):
+            for item in data:
+                self.save_message(item)
+
+        if not isinstance(data, dict):
             return
-
-        def updater(users: Dict[UserId, Birthday]):
-            def append_user(item: dict):
-                uid = item.get(id_column)
-                bday = item.get(birthday_column)
-                if self.store.valid_uuidish(uid) and bday:
-                    users[str(uid)] = str(bday)
-
-            if isinstance(data, list):
-                for item in data:
-                    if isinstance(item, dict):
-                        append_user(item)
-            elif isinstance(data, dict):
-                append_user(data)
-
-        self.store.update(client_id, updater)
+        
+        user_id = UserId(data.get(id_column, ""))
+        birthday = Birthday(data.get(birthday_column, ""))
+        self.data.setdefault(self.current_client_id, {})[user_id] = birthday
 
     def _get_item(self, client_id: ClientId, item_id: str) -> Birthday:
-        users = self.store.load(client_id)
+        users = self.data.get(client_id, {})
         return users.get(item_id, "Unknown Birthday")

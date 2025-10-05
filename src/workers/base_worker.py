@@ -104,7 +104,7 @@ class BaseWorker(ABC):
                         self.handle_eof(message)
                         return
 
-                    logger.info(f"Processing message for client {client_id}")
+                    logger.debug(f"Processing message for client {client_id}")
                     
                     if isinstance(actual_data, list):
                         self.process_batch(actual_data)
