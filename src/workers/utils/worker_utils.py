@@ -1,5 +1,6 @@
 """Utility functions for worker operations."""
 
+import os
 import sys
 import logging
 from typing import Any, Optional, Tuple, Dict
@@ -15,9 +16,7 @@ def run_main(worker_class, *args, **kwargs):
         logger.error(f"Error in main: {e}")
         sys.exit(1)
 
-
 YearHalfSortKey = Tuple[int, int]
-
 
 def safe_float_conversion(value: Any, default: float = 0.0) -> float:
     """Safely convert a value to float.
@@ -340,3 +339,8 @@ def top_items_sort_key(entry: Dict[str, Any], metric_key: str) -> Tuple[YearHalf
 
     item_key = store_id_sort_key(entry.get('item_id'))
     return (year, month), -metric_numeric, item_key
+
+def get_top_number(env_name: str, default: int) -> int:
+    wanted_top_items = safe_int_conversion(os.getenv(env_name), default=default)
+    replica_count = safe_int_conversion(os.getenv('REPLICA_COUNT'), default=1)
+    return wanted_top_items * replica_count

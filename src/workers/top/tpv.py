@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 YearHalf = str
 StoreId = int
 
+# TPV (Total Payment Value) per each semester during 2024 and 2025, per branch, created between 06:00 AM and 11:00 PM.
+
 class TPVWorker(TopWorker):
     """Computes Total Payment Value per semester for each store."""
 

@@ -3,9 +3,11 @@
 """Aggregator that enriches top clients with birthdays and re-ranks globally."""
 
 import logging
-from typing import Any, Dict
+import os
+from collections import defaultdict
+from typing import Any, DefaultDict, Dict, List
 from message_utils import ClientId
-from worker_utils import run_main
+from worker_utils import run_main, safe_int_conversion
 from workers.aggregator.extra_source.users import UsersExtraSource
 from workers.aggregator.extra_source.stores import StoresExtraSource
 from workers.top.top_worker import TopWorker
@@ -20,6 +22,8 @@ class TopClientsBirthdaysAggregator(TopWorker):
 
     def __init__(self) -> None:
         super().__init__()
+        self.top_n = safe_int_conversion(os.getenv('TOP_USERS_COUNT'), default=3)
+
         self.stores_source = StoresExtraSource(self.middleware_config)
         self.stores_source.start_consuming()
         self.birthdays_source = UsersExtraSource(self.middleware_config)
@@ -64,7 +68,7 @@ class TopClientsBirthdaysAggregator(TopWorker):
             aggregated[key]["purchases_qty"] += purchase_qty
 
         # Enrich with birthdays and store names
-        results: list[Dict[str, Any]] = []
+        grouped_results: DefaultDict[str, List[Dict[str, Any]]] = defaultdict(list)
         for entry in aggregated.values():
             user_id = entry["user_id"]
             store_id = entry["store_id"]
@@ -75,7 +79,7 @@ class TopClientsBirthdaysAggregator(TopWorker):
             )
             store_name = self.stores_source.get_item_when_done(client_id, store_id)
 
-            results.append(
+            grouped_results[store_id].append(
                 {
                     "user_id": user_id,
                     "store_id": store_id,
@@ -85,16 +89,26 @@ class TopClientsBirthdaysAggregator(TopWorker):
                 }
             )
 
-        # Sort by store, then desc purchases, then user id for stable output
-        results.sort(
+        limited_results: List[Dict[str, Any]] = []
+        for store_id, entries in grouped_results.items():
+            entries.sort(
+                key=lambda row: (
+                    -int(row.get("purchases_qty", 0) or 0),
+                    row.get("birthdate") or '',
+                    row.get("user_id", 0),
+                )
+            )
+            limited_results.extend(entries[: self.top_n])
+
+        limited_results.sort(
             key=lambda row: (
-                row["store_name"],
+                row.get("store_name") or '',
                 -int(row.get("purchases_qty", 0) or 0),
-                row["birthdate"],
+                row.get("birthdate") or '',
             )
         )
 
-        return results
+        return limited_results
 
     def gateway_type_metadata(self) -> dict:
         return {

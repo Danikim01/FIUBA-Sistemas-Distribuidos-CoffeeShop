@@ -7,7 +7,7 @@ import os
 from collections import defaultdict
 from typing import Any, DefaultDict, Dict, List
 from message_utils import ClientId
-from worker_utils import extract_year_month, run_main, safe_float_conversion, safe_int_conversion
+from worker_utils import extract_year_month, get_top_number, run_main, safe_float_conversion, safe_int_conversion
 from workers.top.top_worker import TopWorker
 
 logging.basicConfig(level=logging.INFO)
@@ -34,18 +34,12 @@ class TopItemsWorker(TopWorker):
     def __init__(self) -> None:
         super().__init__()
 
-        self.top_per_month = self.get_top_number()
+        self.top_per_month = get_top_number('TOP_ITEMS_COUNT', default=1)
 
         self._quantity_totals: QuantityTotals = defaultdict(_new_monthly_quantity_map)
         self._profit_totals: ProfitTotals = defaultdict(_new_monthly_profit_map)
 
         logger.info("TopItemsWorker configured with top_per_month=%s", self.top_per_month)
-
-    @staticmethod
-    def get_top_number() -> int:
-        wanted_top_items = safe_int_conversion(os.getenv('TOP_ITEMS_COUNT', '1'), default=1)
-        replica_count = safe_int_conversion(os.getenv('REPLICA_COUNT', '1'), default=1)
-        return wanted_top_items * replica_count
 
     def reset_state(self, client_id: ClientId) -> None:
         self._quantity_totals[client_id] = _new_monthly_quantity_map()

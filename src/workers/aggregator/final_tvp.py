@@ -13,6 +13,7 @@ class TPVAggregator(TopWorker):
         super().__init__()
         self.stores_source = StoresExtraSource(self.middleware_config)
         self.stores_source.start_consuming()
+        
         self.recieved_payloads: DefaultDict[
             ClientId, DefaultDict[YearHalf, DefaultDict[StoreId, float]]
         ] = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
@@ -48,7 +49,7 @@ class TPVAggregator(TopWorker):
                 )
                 results.append(entry)
 
-        results.sort(key=tpv_sort_key)
+        results.sort(key=tpv_sort_key, reverse=True)
         return results
 
     def gateway_type_metadata(self) -> dict:
