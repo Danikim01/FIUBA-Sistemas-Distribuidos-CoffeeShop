@@ -64,7 +64,7 @@ class BaseWorker(ABC):
         self.middleware_config.output_middleware.send(message)
     
     @abstractmethod
-    def process_message(self, message: Any):
+    def process_message(self, message: dict):
         """Process a single message. Must be implemented by subclasses.
         
         Args:
@@ -73,7 +73,7 @@ class BaseWorker(ABC):
         pass
     
     @abstractmethod
-    def process_batch(self, batch: List[Any]):
+    def process_batch(self, batch: List[dict]):
         """Process a batch of messages. Must be implemented by subclasses.
         
         Args:
@@ -88,7 +88,7 @@ class BaseWorker(ABC):
         Args:
             message: EOF message dictionary
         """
-        self.eof_handler.handle_eof(message, self.current_client_id)
+        self.eof_handler.handle_eof(message)
 
     def start_consuming(self):
         """Start consuming messages from the input queue."""

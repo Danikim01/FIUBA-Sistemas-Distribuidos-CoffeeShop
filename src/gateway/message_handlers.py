@@ -81,7 +81,7 @@ class MessageHandlers:
     
     def _handle_transactions_batch(self, rows: list, client_id: str) -> None:
         """Handle transactions batch processing."""
-        logger.info(f"Processing {len(rows)} transactions with chunking for client {client_id}")
+        logger.debug(f"Processing {len(rows)} transactions with chunking for client {client_id}")
         self.queue_manager.send_transactions_chunks(rows, client_id)
     
     def _handle_stores_batch(self, rows: list, client_id: str) -> None:

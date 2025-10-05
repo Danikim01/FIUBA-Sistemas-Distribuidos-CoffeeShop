@@ -22,16 +22,18 @@ class EOFHandler:
     def handle_eof(
         self,
         message: Dict[str, Any],
-        current_client_id: ClientId,
     ) -> None:
         """Handle EOF message. Can be overridden by subclasses.
         
         Args:
             message: EOF message dictionary
-            current_client_id: Current client identifier
             callback: Optional callback to execute before outputting EOF
         """
-        client_id = message.get('client_id', current_client_id)
+        client_id = message.get('client_id', '')
+        if client_id == '':
+            logger.error("No client_id found in EOF message")
+            return
+
         counter = self.get_counter(message)
 
         if self.should_output(counter):
