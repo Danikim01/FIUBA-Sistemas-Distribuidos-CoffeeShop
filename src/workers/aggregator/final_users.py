@@ -93,18 +93,14 @@ class TopClientsBirthdaysAggregator(TopWorker):
         limited_results: List[Dict[str, Any]] = []
         for store_id, entries in grouped_results.items():
             entries.sort(
-                key=lambda row: (
-                    row.get("store_name") or '',
-                    int(row.get("purchases_qty", 0) or 0),
-                    row.get("birthdate") or '',
-                )
+                key=lambda row: -safe_int_conversion(row.get("purchases_qty"), default=0)
             )
             limited_results.extend(entries[: self.top_n])
 
         limited_results.sort(
             key=lambda row: (
                 row.get("store_name") or '',
-                -int(row.get("purchases_qty", 0) or 0),
+                safe_int_conversion(row.get("purchases_qty"), default=0),
                 row.get("birthdate") or '',
             )
         )
