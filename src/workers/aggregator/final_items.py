@@ -9,6 +9,7 @@ from typing import Any, DefaultDict, Dict, List, Mapping
 
 from message_utils import ClientId
 from worker_utils import run_main, safe_int_conversion
+from workers.aggregator.extra_source.menu_items import MenuItemsExtraSource
 from workers.top.top_worker import TopWorker
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,8 @@ class FinalItemsAggregator(TopWorker):
 
         self._profit_totals: DefaultDict[ClientId, ProfitTotals]
         self._profit_totals = defaultdict(_new_profit_totals)
+
+        self.menu_items_source = MenuItemsExtraSource(self.middleware_config)
 
         logger.info(
             "%s configured with top_per_month=%s",
@@ -149,8 +152,14 @@ class FinalItemsAggregator(TopWorker):
         self._merge_quantity_entries(client_id, payload.get('quantity'))
         self._merge_profit_entries(client_id, payload.get('profit'))
 
+    def get_item_name(self, clientId: ClientId, item_id: ItemId) -> str:
+        while not self.menu_items_source.is_done(clientId):
+            pass  # Wait until the menu items source is done
+        return self.menu_items_source.get_item(clientId, str(item_id))
+
     def _build_results(
         self,
+        client_id: ClientId,
         totals: Mapping[YearMonth, Mapping[ItemId, ItemMetricValue]],
         metric_key: str,
     ) -> List[Dict[str, Any]]:
@@ -167,6 +176,7 @@ class FinalItemsAggregator(TopWorker):
                     {
                         "year_month_created_at": year_month,
                         "item_id": item_id,
+                        "item_name": self.get_item_name(client_id, item_id),
                         metric_key: value,
                     }
                 )
@@ -184,8 +194,8 @@ class FinalItemsAggregator(TopWorker):
         quantity_totals = self._quantity_totals.pop(client_id, _new_quantity_totals())
         profit_totals = self._profit_totals.pop(client_id, _new_profit_totals())
 
-        quantity_results = self._build_results(quantity_totals, "sellings_qty")
-        profit_results = self._build_results(profit_totals, "profit_sum")
+        quantity_results = self._build_results(client_id, quantity_totals, "sellings_qty")
+        profit_results = self._build_results(client_id, profit_totals, "profit_sum")
 
         payload = {
             "quantity": quantity_results,

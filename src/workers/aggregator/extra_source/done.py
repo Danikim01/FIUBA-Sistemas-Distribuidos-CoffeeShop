@@ -25,26 +25,3 @@ class Done:
         if not self._done_event.is_set():
             self._done_event.set()
             self.done = True
-
-    def when_done(
-        self,
-        name: str,
-        callback: Callable[..., None],
-        *args,
-        timeout: float | None = None,
-        **kwargs,
-    ):
-        """Run `callback(*args, **kwargs)` once the given client_id becomes done.
-        Non-blocking: spawns a daemon thread that waits on the underlying Done event.
-        If `timeout` elapses first, the callback is not invoked.
-        """
-        def _wait_and_call():
-            if self._is_done(block=True, timeout=timeout):
-                return callback(*args, **kwargs)
-    
-        t = threading.Thread(
-            target=_wait_and_call,
-            name=name,
-            daemon=True,
-        )
-        t.start()

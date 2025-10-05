@@ -9,8 +9,11 @@ logger = logging.getLogger(__name__)
 
 class _Stores:
     def __init__(self, item: dict):
-        self.id = item.get('id', '')
-        self.name = item.get('name', '')
+        # Accept both legacy (id/name) and current (store_id/store_name) payloads
+        raw_id = item.get('store_id', item.get('id', ''))
+        raw_name = item.get('store_name', item.get('name', ''))
+        self.id = str(raw_id) if raw_id is not None else ''
+        self.name = str(raw_name).strip() if raw_name else ''
 
 StoreName = str
     

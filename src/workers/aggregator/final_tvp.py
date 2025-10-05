@@ -43,7 +43,9 @@ class TPVAggregator(TopWorker):
 
     def _get_store_name(self, client_id: ClientId, store_id: StoreId) -> str:
         """Resolve store name from the extra source; fall back to 'Unknown'."""
-        return self.stores_source.get_item_when_done(client_id, store_id)
+        while not self.stores_source.is_done(client_id):
+            pass  # Wait until the stores source is done for this client
+        return self.stores_source.get_item(client_id, store_id)
 
     def _aggregate_payloads(
         self,
@@ -70,7 +72,19 @@ class TPVAggregator(TopWorker):
                 "store_name": self._get_store_name(client_id, store_id),
             })
 
-        rows.sort(key=lambda r: (r["year_half_created_at"], -r["tpv"]))
+        def _store_id_sort(value: str) -> tuple[int, str]:
+            try:
+                return (int(value), value)
+            except (TypeError, ValueError):
+                return (0, str(value))
+
+        rows.sort(
+            key=lambda r: (
+                r["year_half_created_at"],
+                (r.get("store_name") or ""),
+                _store_id_sort(r.get("store_id", "")),
+            )
+        )
         return rows
 
     def create_payload(self, client_id: ClientId) -> List[Dict[str, Any]]:

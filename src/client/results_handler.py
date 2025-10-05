@@ -237,14 +237,13 @@ class ResultsHandler:
             for entry in sorted_results:
                 store_name = entry.get("store_name", "unknown")
                 store_id = entry.get("store_id", "unknown")
-                year = entry.get("year", "unknown")
-                semester = entry.get("semester", "unknown")
+                semester = entry.get("year_half_created_at", "unknown")
                 try:
                     tpv_value = float(entry.get("tpv", 0))
                 except (TypeError, ValueError):
                     tpv_value = 0.0
                 body_lines.append(
-                    f"Sucursal {store_name} ({store_id}) - {year} {semester}: ${tpv_value:0.2f}"
+                    f"Sucursal {store_id} {semester} {store_name}: ${tpv_value:0.2f}"
                 )
             body_lines.append("-" * 50)
 

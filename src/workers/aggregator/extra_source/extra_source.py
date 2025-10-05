@@ -20,7 +20,7 @@ class ExtraSource(ABC):
         self.middleware = middleware
         self.client_done: dict[ClientId, Done] = {}
 
-    def _is_done(self, client_id: ClientId, block: bool = False, timeout: float | None = None) -> bool:
+    def is_done(self, client_id: ClientId, block: bool = False, timeout: float | None = None) -> bool:
         """Check or wait for the extra source to finish processing for a specific client.
         
         Args:
@@ -85,39 +85,3 @@ class ExtraSource(ABC):
     @abstractmethod
     def get_item(self, client_id: ClientId, item_id: str) -> Any:
         pass
-
-    def get_item_when_done(
-        self,
-        client_id: ClientId,
-        item_id: str,
-        *,
-        timeout: float | None = None,
-    ):
-        """Block until the extra source finished for ``client_id`` and then return the item."""
-        done = self.client_done.setdefault(client_id, Done())
-
-        result_event = threading.Event()
-        result: list[Any] = []
-
-        def _capture_result(*, client_id: ClientId, item_id: str) -> None:
-            result.append(self.get_item(client_id, item_id))
-            result_event.set()
-
-        done.when_done(
-            name=f"get_item_when_done_{self.name}_{client_id}_{item_id}",
-            callback=_capture_result,
-            client_id=client_id,
-            item_id=item_id,
-            timeout=timeout,
-        )
-
-        if not result_event.wait(timeout=timeout):
-            logger.warning(
-                "Extra source %s timed out waiting for client %s before retrieving %s",
-                self.name,
-                client_id,
-                item_id,
-            )
-            return self.get_item(client_id, item_id)
-
-        return result[0]
