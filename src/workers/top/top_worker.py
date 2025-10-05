@@ -54,16 +54,12 @@ class TopWorker(BaseWorker):
         self.eof_handler.handle_eof(message, client_id)
 
     def process_message(self, message: dict):
-        client_id = self.current_client_id or message.get('client_id', '')
-        if not client_id or client_id == '':
-            logger.warning("Transaction received without client metadata")
-            return
-
+        client_id = message.get('client_id', self.current_client_id)
         self.accumulate_transaction(client_id, message)
 
     def process_batch(self, batch: Any):
-        client_id = self.current_client_id or ''
-        if not client_id:
+        client_id: ClientId | None = batch.get('client_id', self.current_client_id)
+        if not client_id or client_id == '':
             logger.warning("Batch received without client metadata")
             return
 
