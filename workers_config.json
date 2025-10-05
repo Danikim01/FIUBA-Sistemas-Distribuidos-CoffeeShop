@@ -16,7 +16,7 @@
       "RESULTS_EXPECTED": 4
     },
     "client": {
-      "count": 1,
+      "count": 4,
       "GATEWAY_HOST": "gateway",
       "GATEWAY_PORT": "12345",
       "BATCH_MAX_SIZE_KB": "64",

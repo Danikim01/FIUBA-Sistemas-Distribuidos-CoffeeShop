@@ -61,12 +61,7 @@ class TopItemsWorker(TopWorker):
     ) -> list[Dict[str, Any]]:
         results: list[Dict[str, Any]] = []
         for year_month, items_map in totals.items():
-            ranked = sorted(
-                items_map.items(), 
-                key=lambda item: (-item[1], item[0])
-            )
-
-            for item_id, value in ranked:
+            for item_id, value in items_map.items():
                 results.append(
                     {
                         'year_month_created_at': year_month,

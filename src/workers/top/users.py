@@ -37,12 +37,7 @@ class TopClientsWorker(TopWorker):
         results: list[Dict[str, Any]] = []
 
         for store_id, user_counts in counts_for_client.items():
-            ranked = sorted(
-                user_counts.items(),
-                key=lambda item: (-item[1], item[0]),
-            )
-
-            for user_id, purchases_qty in ranked:
+            for user_id, purchases_qty in user_counts.items():
                 results.append(
                     {
                         'store_id': store_id,
