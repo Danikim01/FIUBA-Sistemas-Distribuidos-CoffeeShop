@@ -1,4 +1,5 @@
 from collections import defaultdict
+import threading
 from typing import Any, Dict, List, Tuple
 from message_utils import ClientId
 from workers.aggregator.extra_source.stores import StoresExtraSource
@@ -17,7 +18,12 @@ class TPVAggregator(TopWorker):
     def __init__(self) -> None:
         super().__init__()
         self.stores_source = StoresExtraSource(self.middleware_config)
-        self.stores_source.start_consuming()
+        self._stores_thread = threading.Thread(
+            target=self.stores_source.start_consuming,
+            name="stores-extra-source",
+            daemon=True,
+        )
+        self._stores_thread.start()
         self.recieved_payloads: Dict[ClientId, Dict[StoreId, List[StoreData]]] = {}
 
     def reset_state(self, client_id: ClientId) -> None:
@@ -70,6 +76,12 @@ class TPVAggregator(TopWorker):
     def create_payload(self, client_id: ClientId) -> List[Dict[str, Any]]:
         client_payloads = self.recieved_payloads.get(client_id, {})
         return self._aggregate_payloads(client_id, client_payloads)
+
+    def cleanup(self) -> None:
+        try:
+            self.stores_source.close()
+        finally:
+            super().cleanup()
 
 
 if __name__ == "__main__":

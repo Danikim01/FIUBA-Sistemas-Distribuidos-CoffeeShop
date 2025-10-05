@@ -35,9 +35,10 @@ class TopWorker(BaseWorker):
             self.reset_state(client_id)
             self.send_message(payload, client_id=client_id)
             logger.info(
-                "%s emitted results for client %s",
+                "%s emitted %s result(s) for client %s",
                 self.__class__.__name__,
-                payload
+                len(payload) if hasattr(payload, "__len__") else 0,
+                client_id,
             )
         
         self.eof_handler.handle_eof(message, client_id, callback=callback)
