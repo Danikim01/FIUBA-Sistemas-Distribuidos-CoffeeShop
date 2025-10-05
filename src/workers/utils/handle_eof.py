@@ -1,8 +1,9 @@
 import logging
 import os
-from typing import Any, Optional, Dict, Callable
+from typing import Any, Dict, cast
 from message_utils import ClientId, create_message_with_metadata, extract_eof_metadata
 from middleware_config import MiddlewareConfig
+from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
 
 logger = logging.getLogger(__name__)
 
@@ -14,13 +15,12 @@ class EOFHandler:
         self.worker_id: int = int(os.getenv('WORKER_ID', '0'))
         self.replica_count: int = int(os.getenv('REPLICA_COUNT', '1'))
         self.middleware_config = middleware_config
-        self._queue_requeue_middleware = None
+        self._queue_requeue_middleware: RabbitMQMiddlewareQueue = self.get_input_queue()
 
     def handle_eof(
         self,
         message: Dict[str, Any],
         current_client_id: ClientId,
-        callback: Optional[Callable[[], None]] = None,
     ) -> None:
         """Handle EOF message. Can be overridden by subclasses.
         
@@ -33,8 +33,6 @@ class EOFHandler:
         counter = self.get_counter(message)
 
         if self.should_output(counter):
-            if callback:
-                callback()
             self.output_eof(client_id=client_id)
         else:
             self.requeue_eof(client_id=client_id, counter=counter)
@@ -48,19 +46,8 @@ class EOFHandler:
             Counter dictionary
         """
         additional_data: Dict[str, Any] = extract_eof_metadata(message)
-        raw_counter: Dict[Any, Any] = additional_data.get('counter', {}) or {}
-
-        counter: Counter = {}
-        for key, value in raw_counter.items():
-            try:
-                counter[int(key)] = int(value)
-            except (TypeError, ValueError):
-                logger.debug("Ignoring invalid counter entry %s=%s", key, value)
-
-        logger.info("EOF received with counter: %s", counter)
-
+        counter: Dict[int, int] = additional_data.get('counter', {})
         counter[self.worker_id] = counter.get(self.worker_id, 0) + 1
-
         return counter
 
     def should_output(self, counter: Counter) -> bool:
@@ -87,6 +74,12 @@ class EOFHandler:
         message = create_message_with_metadata(client_id, data=None, message_type='EOF')
         self.middleware_config.output_middleware.send(message)
 
+    def get_input_queue(self) -> RabbitMQMiddlewareQueue:
+        """Get the final input queue name, if applicable."""
+        if self.middleware_config.has_input_exchange() and self.middleware_config.input_queue:
+            return self.middleware_config.create_queue(self.middleware_config.input_queue)
+        return cast(RabbitMQMiddlewareQueue, self.middleware_config.input_middleware)
+
     def requeue_eof(self, client_id: ClientId, counter: Counter):
         """Requeue an EOF message back to the input middleware.
         
@@ -99,20 +92,10 @@ class EOFHandler:
             message_type='EOF',
             counter=dict(counter),
         )
-        if self.middleware_config.has_input_exchange() and self.middleware_config.input_queue:
-            if self._queue_requeue_middleware is None:
-                self._queue_requeue_middleware = self.middleware_config.create_queue(
-                    self.middleware_config.input_queue
-                )
-            self._queue_requeue_middleware.send(message)
-        else:
-            self.middleware_config.input_middleware.send(message)
+        self._queue_requeue_middleware.send(message)
 
     def cleanup(self) -> None:
-        if self._queue_requeue_middleware:
-            try:
-                self._queue_requeue_middleware.close()
-            except Exception as exc:  # noqa: BLE001
-                logger.debug("Error closing requeue middleware: %s", exc)
-            finally:
-                self._queue_requeue_middleware = None
+        try:
+            self._queue_requeue_middleware.close()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Error closing requeue middleware: %s", exc)

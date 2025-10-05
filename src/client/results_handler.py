@@ -332,6 +332,7 @@ class ResultsHandler:
 
     def _process_data_dict(self, data: Dict[str, Any], client_id: str) -> bool:
         """Infer result type from a dict payload when message type is missing."""
+        logger.info("Procesando resultado implícito: %s", data.keys())
 
         if {"quantity", "profit"}.issubset(data.keys()):
             return self._process_quantity_profit_bundle(data, client_id)
@@ -381,11 +382,29 @@ class ResultsHandler:
 
         data_section = result.get("data")
 
-        if isinstance(data_section, dict):
-            return self._process_data_dict(data_section, client_id)
+        if isinstance(data_section, dict) and self._process_data_dict(data_section, client_id):
+            return True
 
-        if isinstance(data_section, list):
-            return self._process_data_list(data_section, client_id)
+        if isinstance(data_section, list) and self._process_data_list(data_section, client_id):
+            return True
+
+        # Some gateways may flatten the result structure and remove the "data" wrapper.
+        flattened: Dict[str, Any] = {
+            key: value
+            for key, value in result.items()
+            if key not in {"client_id", "type"}
+        }
+
+        if not flattened:
+            return False
+
+        if self._process_data_dict(flattened, client_id):
+            return True
+
+        candidate_lists = [value for value in flattened.values() if isinstance(value, list)]
+        for rows in candidate_lists:
+            if self._process_data_list(rows, client_id):
+                return True
 
         return False
 

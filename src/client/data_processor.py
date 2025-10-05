@@ -149,7 +149,7 @@ class DataProcessor:
                 if current_batch:
                     batches.append(current_batch)
             
-            logger.info(f"Processed {sum(len(batch) for batch in batches)} rows from {file_path} into {len(batches)} batches")
+            logger.debug(f"Processed {sum(len(batch) for batch in batches)} rows from {file_path} into {len(batches)} batches")
             return batches
             
         except Exception as e:

@@ -160,7 +160,7 @@ class DataSender:
         batch_size = self.data_processor.calculate_optimal_batch_size(data_type)
         
         for csv_file in csv_files:
-            logger.info(f"Processing file: {csv_file}")
+            logger.debug(f"Processing file: {csv_file}")
             
             # Process the file into batches
             batches = self.data_processor.process_csv_file_streaming(csv_file, batch_size)
@@ -178,7 +178,7 @@ class DataSender:
                 file_rows += len(batch)
             
             total_rows += file_rows
-            logger.info(f"Completed processing {csv_file}: {file_rows} rows sent")
+            logger.debug(f"Completed processing {csv_file}: {file_rows} rows sent")
         
         logger.info(f"Finished processing {total_rows} total rows for {data_type_str} "
                    f"(batch size: {batch_size} rows)")
