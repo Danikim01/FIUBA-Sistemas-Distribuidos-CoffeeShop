@@ -340,7 +340,7 @@ def top_items_sort_key(entry: Dict[str, Any], metric_key: str) -> Tuple[YearHalf
     item_key = store_id_sort_key(entry.get('item_id'))
     return (year, month), -metric_numeric, item_key
 
-def get_top_number(env_name: str, default: int) -> int:
-    wanted_top_items = safe_int_conversion(os.getenv(env_name), default=default)
-    replica_count = safe_int_conversion(os.getenv('REPLICA_COUNT'), default=1)
-    return wanted_top_items * replica_count
+# def get_top_number(env_name: str, default: int) -> int:
+#     wanted_top_items = safe_int_conversion(os.getenv(env_name), default=default)
+#     replica_count = safe_int_conversion(os.getenv('REPLICA_COUNT'), default=1)
+#     return wanted_top_items * replica_count

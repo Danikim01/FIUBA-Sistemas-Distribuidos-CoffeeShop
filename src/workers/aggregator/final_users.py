@@ -99,9 +99,8 @@ class TopClientsBirthdaysAggregator(TopWorker):
 
         limited_results.sort(
             key=lambda row: (
-                row.get("store_name") or '',
-                safe_int_conversion(row.get("purchases_qty"), default=0),
-                row.get("birthdate") or '',
+                row.get("store_name", ""),
+                row.get("birthdate", ""),
             )
         )
 
