@@ -1,0 +1,394 @@
+12112 rows
+        transaction_id	                        final_amount
+1029110	00085109-377f-4fc6-b1de-dffa851be665	77.5
+1210879	000e6737-17e3-4517-a021-62515015632d	75.0
+287040	0013c129-37b3-4ce9-bde5-a8914c8e2281	76.5
+996413	0015e7a8-7392-49d0-ae85-74bbf23864aa	81.0
+968306	00217c7a-3a98-4352-b8a2-d6154b11d5a1	75.0
+...	...	...
+550430	ffe4e5d5-08ca-4e22-bd05-b632c5bbad25	79.5
+88444	ffe794a0-c3d4-43bb-8342-838211718157	77.5
+303587	ffec07ed-2fd4-423d-8c47-a2aa9fbf8a06	78.0
+537811	ffed9ac6-b5d3-4b24-9aa8-d0024c115512	75.0
+813393	fff533da-0314-401a-8fdd-d5e7a47a6d6d	84.0
+
+year_month_created_at	item_name	    sellings_qty
+2024-01	                Latte	        311361
+2025-01	                Flat White	    312232
+year_month_created_at	item_name	    profit_sum
+2024-01	                Matcha Latte	3098440.0
+2025-01	                Matcha Latte	3104830.0
+
+	year_half_created_at	store_name	                    tpv
+5	2024-H1	                G Coffee @ Alam Tun Hussein Onn	2053737.00
+7	2024-H1	                G Coffee @ Bandar Seri Mulia	2067969.00
+6	2024-H1	                G Coffee @ Damansara Saujana	2067700.50
+3	2024-H1	                G Coffee @ Kampung Changkat	    2066550.00
+1	2024-H1	                G Coffee @ Kondominium Putra	2053099.00
+8	2024-H1	                G Coffee @ PJS8	                2062318.00
+4	2024-H1	                G Coffee @ Seksyen 21	        2061336.50
+9	2024-H1	                G Coffee @ Taman Damansara	    2077565.00
+2	2024-H1	                G Coffee @ USJ 57W	            2055832.00
+0	2024-H1	                G Coffee @ USJ 89q	2058314.00
+15	2025-H1	                G Coffee @ Alam Tun Hussein Onn	2070212.50
+17	2025-H1	                G Coffee @ Bandar Seri Mulia	2065887.50
+16	2025-H1	                G Coffee @ Damansara Saujana	2062330.50
+13	2025-H1	                G Coffee @ Kampung Changkat	2076358.50
+11	2025-H1	                G Coffee @ Kondominium Putra	2073276.00
+18	2025-H1	                G Coffee @ PJS8	2053659.00
+14	2025-H1	                G Coffee @ Seksyen 21	2055899.00
+19	2025-H1	                G Coffee @ Taman Damansara	2071656.00
+12	2025-H1	                G Coffee @ USJ 57W	2068555.00
+10	2025-H1	                G Coffee @ USJ 89q	2049219.00
+
+                          store_name  birthdate  purchases_qty
+208  G Coffee @ Alam Tun Hussein Onn 1977-08-20              2
+207  G Coffee @ Alam Tun Hussein Onn 1979-02-18              2
+205  G Coffee @ Alam Tun Hussein Onn 1984-08-25              2
+203  G Coffee @ Alam Tun Hussein Onn 2000-06-18              2
+204  G Coffee @ Alam Tun Hussein Onn 2001-12-12              2
+206  G Coffee @ Alam Tun Hussein Onn 2002-10-31              2
+202  G Coffee @ Alam Tun Hussein Onn 2005-05-10              2
+209  G Coffee @ Alam Tun Hussein Onn 2008-06-29              2
+178  G Coffee @ Alam Tun Hussein Onn 1964-08-13              3
+177  G Coffee @ Alam Tun Hussein Onn 1966-04-19              3
+200  G Coffee @ Alam Tun Hussein Onn 1968-01-11              3
+180  G Coffee @ Alam Tun Hussein Onn 1972-11-23              3
+185  G Coffee @ Alam Tun Hussein Onn 1973-11-07              3
+192  G Coffee @ Alam Tun Hussein Onn 1974-07-03              3
+197  G Coffee @ Alam Tun Hussein Onn 1975-03-13              3
+193  G Coffee @ Alam Tun Hussein Onn 1975-04-17              3
+189  G Coffee @ Alam Tun Hussein Onn 1975-11-09              3
+187  G Coffee @ Alam Tun Hussein Onn 1976-01-03              3
+195  G Coffee @ Alam Tun Hussein Onn 1977-03-20              3
+201  G Coffee @ Alam Tun Hussein Onn 1980-10-04              3
+191  G Coffee @ Alam Tun Hussein Onn 1985-05-04              3
+183  G Coffee @ Alam Tun Hussein Onn 1987-08-26              3
+176  G Coffee @ Alam Tun Hussein Onn 1989-06-16              3
+199  G Coffee @ Alam Tun Hussein Onn 1992-10-05              3
+181  G Coffee @ Alam Tun Hussein Onn 1995-11-01              3
+188  G Coffee @ Alam Tun Hussein Onn 1997-07-31              3
+190  G Coffee @ Alam Tun Hussein Onn 1998-04-17              3
+175  G Coffee @ Alam Tun Hussein Onn 1999-07-17              3
+186  G Coffee @ Alam Tun Hussein Onn 2000-03-06              3
+184  G Coffee @ Alam Tun Hussein Onn 2002-01-01              3
+196  G Coffee @ Alam Tun Hussein Onn 2002-02-05              3
+179  G Coffee @ Alam Tun Hussein Onn 2002-08-03              3
+194  G Coffee @ Alam Tun Hussein Onn 2005-07-24              3
+182  G Coffee @ Alam Tun Hussein Onn 2006-08-18              3
+198  G Coffee @ Alam Tun Hussein Onn 2008-08-05              3
+279     G Coffee @ Bandar Seri Mulia 1968-09-24              2
+276     G Coffee @ Bandar Seri Mulia 1987-02-11              2
+278     G Coffee @ Bandar Seri Mulia 1987-02-27              2
+273     G Coffee @ Bandar Seri Mulia 1988-12-15              2
+274     G Coffee @ Bandar Seri Mulia 1993-06-10              2
+275     G Coffee @ Bandar Seri Mulia 1997-08-19              2
+277     G Coffee @ Bandar Seri Mulia 2001-12-26              2
+246     G Coffee @ Bandar Seri Mulia 1965-01-05              3
+263     G Coffee @ Bandar Seri Mulia 1966-04-18              3
+272     G Coffee @ Bandar Seri Mulia 1967-02-18              3
+259     G Coffee @ Bandar Seri Mulia 1967-03-08              3
+264     G Coffee @ Bandar Seri Mulia 1967-05-30              3
+251     G Coffee @ Bandar Seri Mulia 1968-01-16              3
+253     G Coffee @ Bandar Seri Mulia 1969-12-15              3
+266     G Coffee @ Bandar Seri Mulia 1971-02-16              3
+260     G Coffee @ Bandar Seri Mulia 1971-10-20              3
+247     G Coffee @ Bandar Seri Mulia 1973-05-24              3
+265     G Coffee @ Bandar Seri Mulia 1975-02-18              3
+269     G Coffee @ Bandar Seri Mulia 1976-02-04              3
+250     G Coffee @ Bandar Seri Mulia 1976-11-19              3
+262     G Coffee @ Bandar Seri Mulia 1979-12-13              3
+270     G Coffee @ Bandar Seri Mulia 1982-02-17              3
+258     G Coffee @ Bandar Seri Mulia 1983-08-12              3
+261     G Coffee @ Bandar Seri Mulia 1983-12-25              3
+267     G Coffee @ Bandar Seri Mulia 1984-03-05              3
+248     G Coffee @ Bandar Seri Mulia 1984-08-25              3
+256     G Coffee @ Bandar Seri Mulia 1986-05-11              3
+257     G Coffee @ Bandar Seri Mulia 1987-01-03              3
+252     G Coffee @ Bandar Seri Mulia 1988-01-02              3
+254     G Coffee @ Bandar Seri Mulia 1991-01-31              3
+268     G Coffee @ Bandar Seri Mulia 1992-11-29              3
+249     G Coffee @ Bandar Seri Mulia 2004-11-06              3
+255     G Coffee @ Bandar Seri Mulia 2006-03-02              3
+271     G Coffee @ Bandar Seri Mulia 2007-08-02              3
+245     G Coffee @ Bandar Seri Mulia 1965-02-07              4
+241     G Coffee @ Damansara Saujana 1965-03-03              2
+244     G Coffee @ Damansara Saujana 1968-07-27              2
+239     G Coffee @ Damansara Saujana 1992-07-10              2
+240     G Coffee @ Damansara Saujana 2001-09-20              2
+242     G Coffee @ Damansara Saujana 2004-12-21              2
+243     G Coffee @ Damansara Saujana 2009-04-03              2
+223     G Coffee @ Damansara Saujana 1964-12-08              3
+218     G Coffee @ Damansara Saujana 1965-02-17              3
+236     G Coffee @ Damansara Saujana 1967-06-16              3
+237     G Coffee @ Damansara Saujana 1969-09-09              3
+220     G Coffee @ Damansara Saujana 1970-04-21              3
+235     G Coffee @ Damansara Saujana 1972-02-16              3
+217     G Coffee @ Damansara Saujana 1972-08-07              3
+219     G Coffee @ Damansara Saujana 1973-11-07              3
+215     G Coffee @ Damansara Saujana 1974-08-09              3
+229     G Coffee @ Damansara Saujana 1974-11-16              3
+213     G Coffee @ Damansara Saujana 1977-09-22              3
+233     G Coffee @ Damansara Saujana 1978-02-06              3
+222     G Coffee @ Damansara Saujana 1980-08-22              3
+227     G Coffee @ Damansara Saujana 1981-04-14              3
+234     G Coffee @ Damansara Saujana 1982-08-26              3
+210     G Coffee @ Damansara Saujana 1985-03-05              3
+212     G Coffee @ Damansara Saujana 1985-08-16              3
+216     G Coffee @ Damansara Saujana 1987-01-29              3
+230     G Coffee @ Damansara Saujana 1990-03-16              3
+238     G Coffee @ Damansara Saujana 1991-03-19              3
+221     G Coffee @ Damansara Saujana 1993-06-30              3
+224     G Coffee @ Damansara Saujana 1996-08-13              3
+231     G Coffee @ Damansara Saujana 1996-11-16              3
+228     G Coffee @ Damansara Saujana 1997-07-08              3
+211     G Coffee @ Damansara Saujana 1998-06-26              3
+226     G Coffee @ Damansara Saujana 1999-06-04              3
+214     G Coffee @ Damansara Saujana 2001-08-09              3
+232     G Coffee @ Damansara Saujana 2003-07-24              3
+225     G Coffee @ Damansara Saujana 2003-10-25              3
+139      G Coffee @ Kampung Changkat 1992-10-18              2
+131      G Coffee @ Kampung Changkat 1966-04-26              3
+136      G Coffee @ Kampung Changkat 1967-04-19              3
+135      G Coffee @ Kampung Changkat 1967-04-30              3
+117      G Coffee @ Kampung Changkat 1971-04-23              3
+133      G Coffee @ Kampung Changkat 1973-05-18              3
+129      G Coffee @ Kampung Changkat 1974-02-02              3
+128      G Coffee @ Kampung Changkat 1974-12-29              3
+134      G Coffee @ Kampung Changkat 1975-01-19              3
+112      G Coffee @ Kampung Changkat 1975-03-22              3
+137      G Coffee @ Kampung Changkat 1975-12-13              3
+120      G Coffee @ Kampung Changkat 1979-05-08              3
+132      G Coffee @ Kampung Changkat 1981-12-26              3
+118      G Coffee @ Kampung Changkat 1982-06-22              3
+125      G Coffee @ Kampung Changkat 1986-03-05              3
+115      G Coffee @ Kampung Changkat 1986-08-06              3
+127      G Coffee @ Kampung Changkat 1986-08-10              3
+110      G Coffee @ Kampung Changkat 1987-05-20              3
+108      G Coffee @ Kampung Changkat 1987-10-06              3
+111      G Coffee @ Kampung Changkat 1988-01-25              3
+123      G Coffee @ Kampung Changkat 1988-04-07              3
+121      G Coffee @ Kampung Changkat 1995-11-19              3
+122      G Coffee @ Kampung Changkat 1996-12-24              3
+116      G Coffee @ Kampung Changkat 1997-08-29              3
+107      G Coffee @ Kampung Changkat 1999-09-16              3
+119      G Coffee @ Kampung Changkat 2000-07-29              3
+126      G Coffee @ Kampung Changkat 2000-10-21              3
+130      G Coffee @ Kampung Changkat 2001-05-02              3
+138      G Coffee @ Kampung Changkat 2001-07-07              3
+113      G Coffee @ Kampung Changkat 2002-04-25              3
+109      G Coffee @ Kampung Changkat 2003-03-03              3
+106      G Coffee @ Kampung Changkat 2004-10-12              3
+124      G Coffee @ Kampung Changkat 2006-03-13              3
+114      G Coffee @ Kampung Changkat 2007-01-20              3
+105      G Coffee @ Kampung Changkat 1977-10-06              4
+64      G Coffee @ Kondominium Putra 1964-07-25              2
+69      G Coffee @ Kondominium Putra 1966-09-17              2
+65      G Coffee @ Kondominium Putra 1967-05-30              2
+68      G Coffee @ Kondominium Putra 1981-03-08              2
+66      G Coffee @ Kondominium Putra 1982-06-03              2
+67      G Coffee @ Kondominium Putra 1991-09-03              2
+63      G Coffee @ Kondominium Putra 1992-12-11              2
+54      G Coffee @ Kondominium Putra 1965-02-16              3
+58      G Coffee @ Kondominium Putra 1969-04-02              3
+43      G Coffee @ Kondominium Putra 1969-08-18              3
+37      G Coffee @ Kondominium Putra 1970-01-30              3
+39      G Coffee @ Kondominium Putra 1972-05-19              3
+59      G Coffee @ Kondominium Putra 1972-06-10              3
+56      G Coffee @ Kondominium Putra 1972-09-13              3
+40      G Coffee @ Kondominium Putra 1975-01-04              3
+53      G Coffee @ Kondominium Putra 1980-03-20              3
+52      G Coffee @ Kondominium Putra 1981-07-22              3
+61      G Coffee @ Kondominium Putra 1982-02-13              3
+45      G Coffee @ Kondominium Putra 1983-11-06              3
+62      G Coffee @ Kondominium Putra 1984-05-10              3
+51      G Coffee @ Kondominium Putra 1984-06-08              3
+41      G Coffee @ Kondominium Putra 1986-10-06              3
+48      G Coffee @ Kondominium Putra 1986-11-13              3
+44      G Coffee @ Kondominium Putra 1988-05-29              3
+60      G Coffee @ Kondominium Putra 1989-04-07              3
+46      G Coffee @ Kondominium Putra 1989-04-26              3
+47      G Coffee @ Kondominium Putra 1993-01-29              3
+38      G Coffee @ Kondominium Putra 1994-08-21              3
+49      G Coffee @ Kondominium Putra 1998-08-14              3
+42      G Coffee @ Kondominium Putra 1998-08-23              3
+50      G Coffee @ Kondominium Putra 2005-03-02              3
+36      G Coffee @ Kondominium Putra 2007-03-28              3
+55      G Coffee @ Kondominium Putra 2007-11-16              3
+57      G Coffee @ Kondominium Putra 2007-12-27              3
+35      G Coffee @ Kondominium Putra 1993-12-11              4
+314                  G Coffee @ PJS8 1975-07-15              2
+313                  G Coffee @ PJS8 1990-08-08              2
+300                  G Coffee @ PJS8 1965-11-18              3
+284                  G Coffee @ PJS8 1966-12-24              3
+302                  G Coffee @ PJS8 1967-04-16              3
+291                  G Coffee @ PJS8 1969-07-14              3
+312                  G Coffee @ PJS8 1971-02-24              3
+303                  G Coffee @ PJS8 1971-07-28              3
+306                  G Coffee @ PJS8 1973-02-21              3
+304                  G Coffee @ PJS8 1978-07-10              3
+282                  G Coffee @ PJS8 1978-08-09              3
+295                  G Coffee @ PJS8 1982-11-25              3
+287                  G Coffee @ PJS8 1983-09-22              3
+292                  G Coffee @ PJS8 1983-12-18              3
+296                  G Coffee @ PJS8 1984-01-16              3
+283                  G Coffee @ PJS8 1986-02-19              3
+289                  G Coffee @ PJS8 1986-06-25              3
+281                  G Coffee @ PJS8 1996-06-06              3
+290                  G Coffee @ PJS8 1996-07-16              3
+288                  G Coffee @ PJS8 1997-07-21              3
+299                  G Coffee @ PJS8 1997-10-02              3
+293                  G Coffee @ PJS8 1998-09-22              3
+297                  G Coffee @ PJS8 2000-06-23              3
+298                  G Coffee @ PJS8 2002-01-01              3
+286                  G Coffee @ PJS8 2002-01-14              3
+309                  G Coffee @ PJS8 2003-11-02              3
+305                  G Coffee @ PJS8 2005-12-09              3
+310                  G Coffee @ PJS8 2006-06-03              3
+285                  G Coffee @ PJS8 2006-11-20              3
+311                  G Coffee @ PJS8 2007-07-09              3
+294                  G Coffee @ PJS8 2008-01-13              3
+307                  G Coffee @ PJS8 2008-04-21              3
+301                  G Coffee @ PJS8 2008-12-11              3
+308                  G Coffee @ PJS8 2009-05-12              3
+280                  G Coffee @ PJS8 1999-07-11              4
+168            G Coffee @ Seksyen 21 1966-01-20              2
+165            G Coffee @ Seksyen 21 1970-03-03              2
+170            G Coffee @ Seksyen 21 1972-06-25              2
+164            G Coffee @ Seksyen 21 1973-05-08              2
+167            G Coffee @ Seksyen 21 1980-07-29              2
+171            G Coffee @ Seksyen 21 1980-12-02              2
+169            G Coffee @ Seksyen 21 1982-11-09              2
+172            G Coffee @ Seksyen 21 1985-05-22              2
+174            G Coffee @ Seksyen 21 1987-02-15              2
+166            G Coffee @ Seksyen 21 1994-04-12              2
+173            G Coffee @ Seksyen 21 2003-06-10              2
+160            G Coffee @ Seksyen 21 1964-12-04              3
+143            G Coffee @ Seksyen 21 1965-04-01              3
+148            G Coffee @ Seksyen 21 1968-12-13              3
+152            G Coffee @ Seksyen 21 1969-03-26              3
+140            G Coffee @ Seksyen 21 1969-12-26              3
+158            G Coffee @ Seksyen 21 1970-10-11              3
+141            G Coffee @ Seksyen 21 1972-03-05              3
+159            G Coffee @ Seksyen 21 1973-12-08              3
+155            G Coffee @ Seksyen 21 1976-06-11              3
+161            G Coffee @ Seksyen 21 1977-07-19              3
+142            G Coffee @ Seksyen 21 1977-09-30              3
+163            G Coffee @ Seksyen 21 1979-11-11              3
+154            G Coffee @ Seksyen 21 1981-05-03              3
+147            G Coffee @ Seksyen 21 1984-07-25              3
+144            G Coffee @ Seksyen 21 1985-02-07              3
+150            G Coffee @ Seksyen 21 1985-03-16              3
+145            G Coffee @ Seksyen 21 1985-04-13              3
+149            G Coffee @ Seksyen 21 1988-01-30              3
+151            G Coffee @ Seksyen 21 1988-12-03              3
+157            G Coffee @ Seksyen 21 1989-04-03              3
+156            G Coffee @ Seksyen 21 1989-09-10              3
+162            G Coffee @ Seksyen 21 1997-05-28              3
+146            G Coffee @ Seksyen 21 2000-07-15              3
+153            G Coffee @ Seksyen 21 2003-03-22              3
+349       G Coffee @ Taman Damansara 1964-10-03              2
+348       G Coffee @ Taman Damansara 1965-08-28              2
+341       G Coffee @ Taman Damansara 1969-12-14              2
+345       G Coffee @ Taman Damansara 1986-09-12              2
+347       G Coffee @ Taman Damansara 1987-07-18              2
+344       G Coffee @ Taman Damansara 1995-11-02              2
+343       G Coffee @ Taman Damansara 1999-01-24              2
+342       G Coffee @ Taman Damansara 2004-07-17              2
+346       G Coffee @ Taman Damansara 2006-01-04              2
+327       G Coffee @ Taman Damansara 1967-07-02              3
+317       G Coffee @ Taman Damansara 1968-03-18              3
+332       G Coffee @ Taman Damansara 1969-11-09              3
+320       G Coffee @ Taman Damansara 1972-09-23              3
+340       G Coffee @ Taman Damansara 1978-06-18              3
+339       G Coffee @ Taman Damansara 1982-06-22              3
+338       G Coffee @ Taman Damansara 1984-04-19              3
+334       G Coffee @ Taman Damansara 1989-03-07              3
+322       G Coffee @ Taman Damansara 1990-06-01              3
+336       G Coffee @ Taman Damansara 1992-04-03              3
+325       G Coffee @ Taman Damansara 1993-02-25              3
+333       G Coffee @ Taman Damansara 1993-10-27              3
+328       G Coffee @ Taman Damansara 1995-05-16              3
+324       G Coffee @ Taman Damansara 1995-07-15              3
+335       G Coffee @ Taman Damansara 1995-10-17              3
+321       G Coffee @ Taman Damansara 1997-05-12              3
+319       G Coffee @ Taman Damansara 1997-09-23              3
+318       G Coffee @ Taman Damansara 1997-12-28              3
+337       G Coffee @ Taman Damansara 1998-05-09              3
+330       G Coffee @ Taman Damansara 1998-10-31              3
+316       G Coffee @ Taman Damansara 1999-06-22              3
+326       G Coffee @ Taman Damansara 2001-11-16              3
+329       G Coffee @ Taman Damansara 2002-03-15              3
+323       G Coffee @ Taman Damansara 2005-05-28              3
+331       G Coffee @ Taman Damansara 2006-05-21              3
+315       G Coffee @ Taman Damansara 2006-09-13              4
+90                G Coffee @ USJ 57W 1965-01-20              2
+92                G Coffee @ USJ 57W 1966-05-08              2
+101               G Coffee @ USJ 57W 1967-03-09              2
+94                G Coffee @ USJ 57W 1971-12-05              2
+91                G Coffee @ USJ 57W 1978-03-31              2
+99                G Coffee @ USJ 57W 1983-01-18              2
+93                G Coffee @ USJ 57W 1984-12-31              2
+98                G Coffee @ USJ 57W 1987-04-08              2
+100               G Coffee @ USJ 57W 1997-02-26              2
+103               G Coffee @ USJ 57W 2003-02-23              2
+96                G Coffee @ USJ 57W 2005-10-23              2
+97                G Coffee @ USJ 57W 2006-01-04              2
+104               G Coffee @ USJ 57W 2006-06-26              2
+102               G Coffee @ USJ 57W 2006-11-22              2
+95                G Coffee @ USJ 57W 2008-12-15              2
+73                G Coffee @ USJ 57W 1964-11-15              3
+71                G Coffee @ USJ 57W 1971-02-27              3
+89                G Coffee @ USJ 57W 1971-08-03              3
+83                G Coffee @ USJ 57W 1974-06-23              3
+72                G Coffee @ USJ 57W 1978-08-04              3
+81                G Coffee @ USJ 57W 1981-01-26              3
+79                G Coffee @ USJ 57W 1986-07-26              3
+78                G Coffee @ USJ 57W 1989-07-29              3
+84                G Coffee @ USJ 57W 1994-08-11              3
+88                G Coffee @ USJ 57W 1996-06-14              3
+76                G Coffee @ USJ 57W 1999-12-04              3
+82                G Coffee @ USJ 57W 2000-03-31              3
+87                G Coffee @ USJ 57W 2000-06-25              3
+75                G Coffee @ USJ 57W 2000-07-01              3
+85                G Coffee @ USJ 57W 2001-07-02              3
+77                G Coffee @ USJ 57W 2001-08-20              3
+70                G Coffee @ USJ 57W 2005-11-29              3
+80                G Coffee @ USJ 57W 2006-02-27              3
+74                G Coffee @ USJ 57W 2006-12-02              3
+86                G Coffee @ USJ 57W 2007-03-14              3
+34                G Coffee @ USJ 89q 2008-10-06              2
+31                G Coffee @ USJ 89q 1965-08-05              3
+16                G Coffee @ USJ 89q 1968-10-31              3
+29                G Coffee @ USJ 89q 1969-02-01              3
+18                G Coffee @ USJ 89q 1969-02-18              3
+26                G Coffee @ USJ 89q 1970-04-23              3
+8                 G Coffee @ USJ 89q 1970-09-20              3
+32                G Coffee @ USJ 89q 1971-08-04              3
+25                G Coffee @ USJ 89q 1972-02-15              3
+23                G Coffee @ USJ 89q 1972-10-11              3
+28                G Coffee @ USJ 89q 1976-05-30              3
+11                G Coffee @ USJ 89q 1977-04-27              3
+7                 G Coffee @ USJ 89q 1978-06-10              3
+10                G Coffee @ USJ 89q 1980-09-16              3
+30                G Coffee @ USJ 89q 1980-10-04              3
+15                G Coffee @ USJ 89q 1981-09-07              3
+33                G Coffee @ USJ 89q 1981-11-28              3
+9                 G Coffee @ USJ 89q 1982-09-13              3
+17                G Coffee @ USJ 89q 1982-12-02              3
+1                 G Coffee @ USJ 89q 1983-08-17              3
+20                G Coffee @ USJ 89q 1984-01-07              3
+27                G Coffee @ USJ 89q 1986-05-24              3
+21                G Coffee @ USJ 89q 1989-04-12              3
+12                G Coffee @ USJ 89q 1994-02-18              3
+4                 G Coffee @ USJ 89q 1994-05-10              3
+19                G Coffee @ USJ 89q 1995-09-29              3
+2                 G Coffee @ USJ 89q 2000-03-01              3
+24                G Coffee @ USJ 89q 2001-11-27              3
+3                 G Coffee @ USJ 89q 2002-12-18              3
+5                 G Coffee @ USJ 89q 2003-04-21              3
+6                 G Coffee @ USJ 89q 2004-07-25              3
+22                G Coffee @ USJ 89q 2004-08-31              3
+13                G Coffee @ USJ 89q 2008-10-25              3
+14                G Coffee @ USJ 89q 2009-05-03              3
+0                 G Coffee @ USJ 89q 1995-10-21              4
