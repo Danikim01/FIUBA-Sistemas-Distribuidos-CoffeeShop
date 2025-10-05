@@ -3,6 +3,7 @@ import threading
 from typing import Any, Dict, List, Tuple
 from message_utils import ClientId
 from workers.aggregator.extra_source.stores import StoresExtraSource
+from tpv_utils import normalize_tpv_entry, tpv_sort_key
 from workers.top.top_worker import TopWorker
 from worker_utils import run_main
 
@@ -65,26 +66,15 @@ class TPVAggregator(TopWorker):
         # Build final rows with enrichment
         rows: List[Dict[str, Any]] = []
         for (year_half, store_id), tpv_sum in totals.items():
-            rows.append({
+            entry = {
                 "year_half_created_at": year_half,
                 "store_id": store_id,
-                "tpv": tpv_sum,
+                "tpv": float(tpv_sum),
                 "store_name": self._get_store_name(client_id, store_id),
-            })
+            }
+            rows.append(normalize_tpv_entry(entry))
 
-        def _store_id_sort(value: str) -> tuple[int, str]:
-            try:
-                return (int(value), value)
-            except (TypeError, ValueError):
-                return (0, str(value))
-
-        rows.sort(
-            key=lambda r: (
-                r["year_half_created_at"],
-                (r.get("store_name") or ""),
-                _store_id_sort(r.get("store_id", "")),
-            )
-        )
+        rows.sort(key=tpv_sort_key)
         return rows
 
     def create_payload(self, client_id: ClientId) -> List[Dict[str, Any]]:

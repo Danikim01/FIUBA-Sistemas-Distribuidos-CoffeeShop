@@ -220,32 +220,31 @@ class ResultsHandler:
             results = []
 
         body_lines: List[str] = []
+
         if not results:
             body_lines.append(
                 "Sin registros que cumplan las condiciones para calcular TPV."
             )
-            body_lines.append("-" * 50)
         else:
-            sorted_results = sorted(
-                results,
-                key=lambda entry: (
-                    entry.get("year", 0),
-                    entry.get("semester", ""),
-                    entry.get("store_name", ""),
-                ),
-            )
-            for entry in sorted_results:
+            for entry in results:
                 store_name = entry.get("store_name", "unknown")
                 store_id = entry.get("store_id", "unknown")
-                semester = entry.get("year_half_created_at", "unknown")
+                period = entry.get("year_half_created_at") or ""
+                if not period:
+                    year = entry.get("year")
+                    semester = entry.get("semester")
+                    period = f"{year} {semester}".strip()
+
                 try:
                     tpv_value = float(entry.get("tpv", 0))
                 except (TypeError, ValueError):
                     tpv_value = 0.0
+
                 body_lines.append(
-                    f"Sucursal {store_id} {semester} {store_name}: ${tpv_value:0.2f}"
+                    f"Sucursal {store_id} {period} {store_name}: ${tpv_value:0.2f}"
                 )
-            body_lines.append("-" * 50)
+
+        body_lines.append("-" * 50)
 
         self._append_to_file("tpv_summary.txt", body_lines, client_id)
         self.query1_items_received += len(results)

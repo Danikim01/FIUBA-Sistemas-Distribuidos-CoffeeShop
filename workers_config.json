@@ -65,7 +65,7 @@
     "items_top": {
       "count": 2,
       "environment": {
-        "INPUT_QUEUE": "transaction_items_raw",
+        "INPUT_QUEUE": "transaction_items_year_filtered",
         "OUTPUT_QUEUE": "top_items_partial"
       }
     },
