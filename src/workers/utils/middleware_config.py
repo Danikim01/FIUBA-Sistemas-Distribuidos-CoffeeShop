@@ -16,7 +16,7 @@ class MiddlewareConfig:
             output_exchange: Output exchange name for fanout (optional)
             output_queue: Output queue name for direct sending (optional)
         """
-        self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
+        self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'rabbitmq')
         self.rabbitmq_port = int(os.getenv('RABBITMQ_PORT', '5672'))
 
         self.input_queue = os.getenv('INPUT_QUEUE', '').strip()
@@ -36,7 +36,6 @@ class MiddlewareConfig:
             return self.create_exchange(
                 self.input_exchange,
                 queue_name=queue_override,
-                prefetch_count=self.prefetch_count,
             )
         return self.create_queue(self.input_queue)
 
@@ -48,9 +47,7 @@ class MiddlewareConfig:
     def create_exchange(
         self,
         name: str,
-        *, # Esta cosa rara hace que los siguientes argumentos sean solo por nombre
-        queue_name: Optional[str] = None,
-        prefetch_count: Optional[int] = None,
+        queue_name: Optional[str] = None
     ) -> RabbitMQMiddlewareExchange:
         return RabbitMQMiddlewareExchange(
             host=self.rabbitmq_host,
@@ -59,7 +56,7 @@ class MiddlewareConfig:
             exchange_type='direct',
             port=self.rabbitmq_port,
             queue_name=queue_name,
-            prefetch_count=prefetch_count if prefetch_count is not None else self.prefetch_count,
+            prefetch_count=self.prefetch_count
         )
 
     def create_queue(self, name: str) -> RabbitMQMiddlewareQueue:
