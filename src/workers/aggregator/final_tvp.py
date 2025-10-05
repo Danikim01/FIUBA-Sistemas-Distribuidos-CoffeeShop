@@ -55,7 +55,7 @@ class TPVAggregator(TopWorker):
         results.sort(key=tpv_sort_key, reverse=True)
         return results
 
-    def type_metadata(self) -> dict:
+    def gateway_type_metadata(self) -> dict:
         return {
             "list_type": "TPV_SUMMARY",
         }

@@ -27,8 +27,8 @@ class TopWorker(BaseWorker):
         """Reset the internal state for a given client."""
         pass
 
-    def type_metadata(self) -> dict:
-        """For gateway use only."""
+    def gateway_type_metadata(self) -> dict:
+        """For aggregators to override and provide type metadata."""
         return {}
 
     # @overwrite
@@ -41,7 +41,7 @@ class TopWorker(BaseWorker):
             return
 
         self.reset_state(client_id)
-        self.send_message(payload, client_id=client_id, type_metadata=self.type_metadata())
+        self.send_message(payload, client_id=client_id, type_metadata=self.gateway_type_metadata())
         logger.info(
             "%s emitted %s result(s) for client %s",
             self.__class__.__name__,

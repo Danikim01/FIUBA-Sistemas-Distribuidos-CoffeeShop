@@ -138,7 +138,7 @@ class FinalItemsAggregator(TopWorker):
 
         return [payload]
 
-    def type_metadata(self) -> dict:
+    def gateway_type_metadata(self) -> dict:
         return {
             "bundle_types": {
                 "quantity": "TOP_ITEMS_BY_QUANTITY",
