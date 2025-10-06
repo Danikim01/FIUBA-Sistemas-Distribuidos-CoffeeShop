@@ -9,7 +9,7 @@ from protocol import DataType # type: ignore
 logger = logging.getLogger(__name__)
 
 # Maximum serialized size per row type in bytes (calculated from CSV structure analysis)
-MAX_ROW_SIZES = {
+ESTIMATED_ROW_SIZES = {
     DataType.TRANSACTIONS: 95,      # transaction_id(40) + store_id(4) + payment_method_id(4) + 
                                     # voucher_id(4) + user_id(4) + amounts(12) + created_at(23) + overhead(4)
     DataType.TRANSACTION_ITEMS: 83,  # transaction_id(40) + item_id(4) + quantity(4) + 
@@ -30,7 +30,7 @@ def get_max_row_size(data_type: DataType) -> int:
     Returns:
         Maximum size in bytes for a row of this type
     """
-    return MAX_ROW_SIZES.get(data_type, 100)  # Default to 100 if unknown type
+    return ESTIMATED_ROW_SIZES.get(data_type, 100)  # Default to 100 if unknown type
 
 
 def estimate_row_size(data_type: DataType, sample_row: Dict[str, Any] | None = None) -> int:
