@@ -44,7 +44,6 @@ class TopWorker(BaseWorker):
     
     # @override
     def handle_eof(self, message: Dict[str, Any]):
-        logger.info("Handling EOF %s", message)
         payload = self.create_payload(self.current_client_id)
         if len(payload) > 0:
             self.reset_state(self.current_client_id)

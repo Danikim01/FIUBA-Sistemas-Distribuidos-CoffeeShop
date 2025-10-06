@@ -272,7 +272,6 @@ class ResultsHandler:
         normalized_type = str(message_type).upper() if message_type else ""
 
         if normalized_type == "EOF":
-            logger.info("EOF recibido en resultados del cliente")
             return False
         if normalized_type == "TPV_SUMMARY":
             self._render_tpv_summary(result, client_id)
