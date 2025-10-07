@@ -85,7 +85,7 @@ class DataProcessor:
 
         reduce = self.reduced and data_type_str in ['transactions', 'transaction_items']
         if reduce:
-            csv_files = [f for f in csv_files if '202401' in f or '202501' in f]
+            csv_files = [f for f in csv_files if f.endswith("01.csv")] # Solo el mes de enero (2024/5)
 
         csv_files.sort()  # Process files in order
         logger.info(f"Found {len(csv_files)} CSV files in {type_dir}")
