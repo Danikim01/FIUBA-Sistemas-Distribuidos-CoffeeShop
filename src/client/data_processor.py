@@ -60,8 +60,9 @@ class DataProcessor:
         """
         self.data_dir = data_dir
         self.max_batch_size_kb = max_batch_size_kb
-        # self.reduced = bool(os.getenv('REDUCED', False))
-        self.reduced = True
+        # Convert string environment variable to boolean
+        reduced_env = os.getenv('REDUCED', 'true').lower()
+        self.reduced = reduced_env in ('true', '1', 'yes', 'on')
     
     def get_csv_files_by_type(self, data_type_str: str) -> List[str]:
         """Get all CSV files for a specific data type.

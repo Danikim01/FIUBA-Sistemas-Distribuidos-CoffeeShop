@@ -33,6 +33,7 @@ class EOFHandler:
         counter = self.get_counter(message)
 
         if self.should_output(counter):
+            logger.info(f"Worker {self.worker_id}: Outputting EOF for client {client_id} with counter {counter}")
             self.output_eof(client_id=client_id)
         else:
             self.requeue_eof(client_id=client_id, counter=counter)

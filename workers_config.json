@@ -20,7 +20,8 @@
       "GATEWAY_PORT": "12345",
       "BATCH_MAX_SIZE_KB": "512",
       "LOG_LEVEL": "INFO",
-      "DATA_DIR": ".data"
+      "DATA_DIR": ".data",
+      "REDUCED": "true"
     }
   },
   "workers": {
