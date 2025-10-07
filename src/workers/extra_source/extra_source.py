@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 import logging
 import threading
-from typing import Any
 from message_utils import ClientId, extract_data_and_client_id, is_eof_message
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue
 from workers.extra_source.done import Done
@@ -41,7 +40,7 @@ class ExtraSource(ABC):
                     return
                 
                 if is_eof_message(message):
-                    logger.info(f"EOF received from extra source {self.name}")
+                    logger.info(f"EOF from client {client_id} received from extra source {self.name}")
                     self.clients_done.set_done(client_id)
                     return
 
