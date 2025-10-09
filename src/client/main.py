@@ -55,25 +55,55 @@ class CoffeeShopClient:
         logger.info("Coffee Shop Client initialized successfully")
     
     def run(self):
-        """Main client execution."""
+        """Main client execution with continuous sessions."""
         try:
             # Connect to gateway
             if not self.connection.connect():
                 logger.error("Failed to connect to gateway")
                 return False
             
-            # Send all data types
-            if not self.data_sender.send_all_data_types():
-                logger.error("Failed to send all data")
-                return False
+            session_count = 0
+            max_sessions = int(os.getenv('MAX_SESSIONS', '10'))  # Default to 10 sessions
             
-            logger.info("All data sent successfully")
+            logger.info(f"Starting continuous mode with {max_sessions} sessions")
+            
+            while session_count < max_sessions:
+                session_count += 1
+                logger.info(f"=== Starting session {session_count}/{max_sessions} ===")
+                
+                # Send all data types
+                if not self.data_sender.send_all_data_types():
+                    logger.error("Failed to send all data")
+                    return False
+                
+                logger.info("All data sent successfully")
 
-            # Wait for and process results from gateway
-            self.results_handler.process_results_stream(self.connection.get_socket())
+                # Wait for and process results from gateway
+                self.results_handler.process_results_stream(self.connection.get_socket())
+                
+                logger.info(f"Session {session_count} completed successfully")
+                
+                # If not the last session, reset for next session
+                if session_count < max_sessions:
+                    logger.info(f"Preparing for session {session_count + 1}")
+                    
+                    # Send session reset message to start a new session
+                    if not self.connection.send_session_reset():
+                        logger.error("Failed to reset session")
+                        break
+                    
+                    # Reset results handler state for new session
+                    self.results_handler.reset_session_state()
+                    
+                    logger.info("Session reset successful, starting next session")
+                else:
+                    logger.info("All sessions completed")
             
             return True
             
+        except KeyboardInterrupt:
+            logger.info("Client interrupted by user")
+            return True
         except Exception as e:
             logger.error(f"Error in client execution: {e}")
             return False

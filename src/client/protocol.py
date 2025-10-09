@@ -78,6 +78,7 @@ def unpack_string(data: bytes, offset: int) -> tuple[str, int]:
 class MessageType(IntEnum):
     BATCH = 1
     EOF = 2  # End of files for a specific data type
+    SESSION_RESET = 3  # Reset session to start a new session
 
 class DataType(IntEnum):
     TRANSACTIONS = 1
@@ -312,6 +313,24 @@ def send_eof(sock: socket.socket, data_type: DataType) -> None:
     
     send_all(sock, message)
     logger.info(f"Sent EOF for data type: {data_type}")
+
+def send_session_reset(sock: socket.socket) -> None:
+    """
+    Send session reset signal to start a new session
+    
+    Protocol:
+    - Total Message Size (4 bytes): size of entire message including this field
+    - Message Type (4 bytes): SESSION_RESET
+    """
+    # Calculate total message size (total_size + msg_type)
+    total_message_size = 4 + 4
+    
+    message = b''
+    message += pack_uint32(total_message_size)      # Total Message Size
+    message += pack_uint32(MessageType.SESSION_RESET)  # Message Type
+    
+    send_all(sock, message)
+    logger.info("Sent session reset message")
 
 def receive_response(sock: socket.socket) -> int:
     """Receive response from server"""

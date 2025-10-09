@@ -3,7 +3,7 @@
 import socket
 import logging
 from typing import List, Dict, Any
-from protocol import DataType, send_batch, send_eof, receive_response # type: ignore
+from protocol import DataType, send_batch, send_eof, send_session_reset, receive_response # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +125,32 @@ class ClientConnection:
             Socket object if connected, None otherwise
         """
         return self.socket
+    
+    def send_session_reset(self) -> bool:
+        """Send session reset message to start a new session.
+        
+        Returns:
+            True if session reset sent successfully, False otherwise
+        """
+        if not self.socket:
+            logger.error("No socket connection available for session reset")
+            return False
+            
+        try:
+            send_session_reset(self.socket)
+            
+            # Wait for response
+            response_code = receive_response(self.socket)
+            if response_code == 0:  # ResponseCode.OK
+                logger.info("Session reset successfully")
+                return True
+            else:
+                logger.error(f"Gateway rejected session reset (response code: {response_code})")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to send session reset: {e}")
+            return False
 
 
 class DataSender:
