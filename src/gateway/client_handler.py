@@ -39,6 +39,20 @@ class ClientHandler:
                     if message_type == MessageType.BATCH:
                         self.message_handlers.handle_batch_message(client_socket, message_data, client_id)
                         
+                    elif message_type == MessageType.SESSION_RESET:
+                        # Create a completely new session for this connection
+                        new_client_id = self.session_manager.create_session(client_socket, address)
+                        
+                        # Remove the old session
+                        self.session_manager.remove_session(client_id)
+                        
+                        # Update to use the new client ID
+                        client_id = new_client_id
+                        
+                        # Send success response
+                        self._send_response_safe(client_socket, True)
+                        logger.info(f"Created new session with client ID: {client_id}")
+                        
                     elif message_type == MessageType.EOF:
                         session = self.session_manager.get_session(client_id)
                         if not session:
@@ -65,11 +79,14 @@ class ClientHandler:
                             if all_eof_received:
                                 logger.info(f"All EOFs received for client {client_id}, starting result forwarding")
                                 self._forward_results_to_client(client_socket, client_id)
-                                break
+                                # Continue the loop to wait for session reset or disconnect
+                                # Don't break here to allow for new sessions
+                            else:
+                                logger.debug(f"EOF received for {data_type.name} from client {client_id}")
 
-                    else:
-                        logger.warning(f"Unknown message type: {message_type} from client {client_id}")
-                        self._send_response_safe(client_socket, False)
+                        else:
+                            logger.warning(f"Unknown message type: {message_type} from client {client_id}")
+                            self._send_response_safe(client_socket, False)
                         
                 except ConnectionError:
                     logger.info(f"Client {client_id} from {address} disconnected")
@@ -81,10 +98,10 @@ class ClientHandler:
                     
         except Exception as e:
             logger.error(f"Error in client handler for {client_id} at {address}: {e}")
-        finally:
+        # finally:
             # Clean up client session
-            self.session_manager.cleanup_session(client_id)
-            logger.info(f"Connection with client {client_id} from {address} closed")
+            # self.session_manager.cleanup_session(client_id)
+            # logger.info(f"Connection with client {client_id} from {address} closed")
     
     def _send_response_safe(self, client_socket: socket.socket, success: bool) -> None:
         """Safely send response to client."""

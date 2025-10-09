@@ -47,8 +47,8 @@ class BaseWorker(ABC):
             frame: Current stack frame
         """
         logger.info("SIGTERM received, initiating graceful shutdown...", signum, frame)
-        self.middleware_config.input_middleware.stop_consuming()
         self.shutdown_requested = True
+        self.cleanup()
     
     def send_message(self, data: Any, **metadata):
         """Send a message to the output with client metadata.

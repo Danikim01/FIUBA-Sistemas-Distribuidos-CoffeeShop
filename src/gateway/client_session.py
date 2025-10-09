@@ -96,12 +96,3 @@ class ClientSessionManager:
         """Get the number of active client sessions."""
         with self._lock:
             return len(self._sessions)
-    
-    def cleanup_session(self, client_id: str) -> None:
-        """Clean up resources for a session."""
-        session = self.remove_session(client_id)
-        if session:
-            try:
-                session.socket.close()
-            except Exception as e:
-                logger.error(f"Error closing socket for client {client_id}: {e}")

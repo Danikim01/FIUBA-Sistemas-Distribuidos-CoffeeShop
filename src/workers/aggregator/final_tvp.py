@@ -20,6 +20,7 @@ class TPVAggregator(TopWorker):
 
     def reset_state(self, client_id: ClientId) -> None:
         self.recieved_payloads[client_id] = defaultdict(lambda: defaultdict(float))
+        self.stores_source.reset_state(client_id)
 
     def accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
         """Accumulate data from a single transaction payload."""

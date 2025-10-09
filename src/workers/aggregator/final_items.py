@@ -57,6 +57,7 @@ class FinalItemsAggregator(TopWorker):
     def reset_state(self, client_id: ClientId) -> None:
         self._quantity_totals[client_id] = _new_quantity_totals()
         self._profit_totals[client_id] = _new_profit_totals()
+        self.menu_items_source.reset_state(client_id)
 
     def _merge_quantity_totals_map(self, client_id: ClientId, totals: Any) -> None:
         if not isinstance(totals, dict):

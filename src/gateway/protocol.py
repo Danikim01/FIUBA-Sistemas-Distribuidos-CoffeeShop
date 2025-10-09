@@ -41,6 +41,7 @@ def unpack_string(data: bytes, offset: int) -> tuple[str, int]:
 class MessageType(IntEnum):
     BATCH = 1
     EOF = 2  # EOF for a specific data type
+    SESSION_RESET = 3  # Reset session to start a new session
 
 class DataType(IntEnum):
     TRANSACTIONS = 1
@@ -184,6 +185,17 @@ def send_response(sock: socket.socket, success: bool) -> None:
     message += pack_uint32(total_message_size) # Total Message Size
     response_code = ResponseCode.OK if success else ResponseCode.ERROR
     message += pack_uint32(response_code) # Response Code
+    
+    send_all(sock, message)
+
+def send_session_reset_message(sock: socket.socket) -> None:
+    """Send a session reset message"""
+    # Calculate total message size: total_size (4) + message_type (4)
+    total_message_size = 4 + 4
+    
+    message = b''
+    message += pack_uint32(total_message_size)  # Total Message Size
+    message += pack_uint32(MessageType.SESSION_RESET)  # Message Type
     
     send_all(sock, message)
 

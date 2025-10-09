@@ -33,6 +33,8 @@ class TopClientsBirthdaysAggregator(TopWorker):
 
     def reset_state(self, client_id: ClientId) -> None:
         self.recieved_payloads[client_id] = []
+        self.stores_source.reset_state(client_id)
+        self.birthdays_source.reset_state(client_id)
     
     def accumulate_transaction(self, client_id: str, payload: dict[str, Any]) -> None:
         self.recieved_payloads.setdefault(client_id, []).append(payload)

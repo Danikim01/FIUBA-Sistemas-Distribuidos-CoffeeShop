@@ -47,6 +47,9 @@ def estimate_row_size(data_type: DataType, sample_row: Dict[str, Any] | None = N
     # This is more efficient and the sizes are predictable based on CSV structure
     return get_max_row_size(data_type)
 
+def get_reduced() -> bool:
+    reduced_env = os.getenv('REDUCED', 'true').lower()
+    return reduced_env in ('true', '1', 'yes', 'on')
 
 class DataProcessor:
     """Handles CSV file processing and batch management."""
@@ -60,7 +63,8 @@ class DataProcessor:
         """
         self.data_dir = data_dir
         self.max_batch_size_kb = max_batch_size_kb
-    
+        self.reduced = get_reduced()
+
     def get_csv_files_by_type(self, data_type_str: str) -> List[str]:
         """Get all CSV files for a specific data type.
         
@@ -71,16 +75,20 @@ class DataProcessor:
             List of file paths for the data type
         """
         type_dir = os.path.join(self.data_dir, data_type_str)
-        
+
         if not os.path.exists(type_dir):
             logger.warning(f"Directory {type_dir} does not exist")
             return []
-            
+
         csv_files = []
         for file in os.listdir(type_dir):
-            if file.endswith('.csv'):
+            if file.endswith(".csv"):
                 csv_files.append(os.path.join(type_dir, file))
-        
+
+        reduce = self.reduced and data_type_str in ['transactions', 'transaction_items']
+        if reduce:
+            csv_files = [f for f in csv_files if f.endswith("01.csv")] # Solo el mes de enero (2024/5)
+
         csv_files.sort()  # Process files in order
         logger.info(f"Found {len(csv_files)} CSV files in {type_dir}")
         return csv_files

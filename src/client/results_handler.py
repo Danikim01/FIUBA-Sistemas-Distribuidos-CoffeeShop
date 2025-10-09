@@ -57,6 +57,12 @@ class ResultsHandler:
         self._initialized_clients: set[str] = set()
         self.current_client_id: str = ""
 
+    def reset_session_state(self):
+        """Reset state for a new session."""
+        self.queries_completed = 0
+        self.query1_items_received = 0
+        logger.info("Results handler state reset for new session")
+
     def _initialize_client_files(self, client_id: str) -> Path:
         """Create client-specific directory and initialize headers if needed."""
 

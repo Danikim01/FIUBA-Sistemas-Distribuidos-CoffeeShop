@@ -19,19 +19,22 @@ class StoresExtraSource(ExtraSource):
         middleware = middleware_config.create_exchange(stores_exchange)
         super().__init__(stores_exchange, middleware)
         self.data: dict[ClientId, dict[StoreId, StoreName]] = {}
+
+    def reset_state(self, client_id: ClientId):
+        """Reset the internal state of the extra source."""
+        self.data.pop(client_id, None)
     
-    def save_message(self, data: dict):
+    def save_data(self, data: dict):
         """Save the message to disk or process it as needed."""
-
-        if isinstance(data, list):
-            for item in data:
-                self.save_message(item)
-
-        if isinstance(data, dict):
-            stores = self.data.setdefault(self.current_client_id, {})
-            store_id = str(data.get('store_id', '')).strip()
-            store_name = str(data.get('store_name', '')).strip()
-            stores[store_id] = store_name
+        stores = self.data.setdefault(self.current_client_id, {})
+        store_id = str(data.get('store_id', '')).strip()
+        store_name = str(data.get('store_name', '')).strip()
+        stores[store_id] = store_name
+    
+    def save_batch(self, data: list):
+        """Save a batch of messages to disk or process them as needed."""
+        for item in data:
+            self.save_data(item)
 
     def _get_item(self, client_id: ClientId, item_id: str) -> StoreName:
         """Retrieve item from the extra source.

@@ -21,17 +21,20 @@ class UsersExtraSource(ExtraSource):
 
         self.data: dict[ClientId, Dict[UserId, Birthday]] = {}
 
-    def save_message(self, data: dict | list):
-        if isinstance(data, list):
-            for item in data:
-                self.save_message(item)
+    def reset_state(self, client_id: ClientId):
+        """Reset the internal state of the extra source."""
+        self.data.pop(client_id, None)
 
-        if not isinstance(data, dict):
-            return
-        
+    def save_data(self, data: dict):
+        """Save the message to disk or process it as needed."""
         user_id = UserId(data.get(id_column, ""))
         birthday = Birthday(data.get(birthday_column, ""))
         self.data.setdefault(self.current_client_id, {})[user_id] = birthday
+
+    def save_batch(self, data: list):
+        """Save a batch of messages to disk or process them as needed."""
+        for item in data:
+            self.save_data(item)
 
     def _get_item(self, client_id: ClientId, item_id: str) -> Birthday:
         users = self.data.get(client_id, {})
