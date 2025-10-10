@@ -12,6 +12,7 @@ from worker_utils import run_main, safe_int_conversion, top_items_sort_key
 from workers.extra_source.menu_items import MenuItemsExtraSource
 from workers.top.top_worker import TopWorker
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Best-selling products (name and quantity) and products that generated the biggest profits (name and profit), for each month of 2024 and 2025.
@@ -133,6 +134,10 @@ class FinalItemsAggregator(TopWorker):
 
         quantity_results = self._build_results(client_id, quantity_totals, "sellings_qty")
         profit_results = self._build_results(client_id, profit_totals, "profit_sum")
+
+        if not quantity_results and not profit_results:
+            logging.info(f"No results to send for client {client_id}")
+            return []
 
         payload = {
             "quantity": quantity_results,

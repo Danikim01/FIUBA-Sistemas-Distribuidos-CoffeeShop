@@ -3,7 +3,7 @@
 import os
 import sys
 import logging
-from typing import Any, Optional, Tuple, Dict
+from typing import Any, List, Optional, Tuple, Dict
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -344,3 +344,22 @@ def top_items_sort_key(entry: Dict[str, Any], metric_key: str) -> Tuple[YearHalf
 #     wanted_top_items = safe_int_conversion(os.getenv(env_name), default=default)
 #     replica_count = safe_int_conversion(os.getenv('REPLICA_COUNT'), default=1)
 #     return wanted_top_items * replica_count
+
+# Pequeña trampa
+def get_payload_len(payload: List[Dict[str, Any]]) -> int:
+    if not payload:
+        return 0
+
+    item0 = payload[0]
+    if not isinstance(item0, dict):
+        return len(payload)
+
+    qty_totals = item0.get("quantity_totals") or {}
+    profit_totals = item0.get("profit_totals") or {}
+
+    if isinstance(qty_totals, dict) or isinstance(profit_totals, dict):
+        qty_count = sum(len(v) for v in qty_totals.values() if isinstance(v, dict))
+        prof_count = sum(len(v) for v in profit_totals.values() if isinstance(v, dict))
+        return qty_count + prof_count
+
+    return len(payload)

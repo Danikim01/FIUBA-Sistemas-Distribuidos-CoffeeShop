@@ -4,6 +4,7 @@ from abc import abstractmethod
 from asyncio.log import logger
 from typing import Any, Dict, TypeVar
 from message_utils import ClientId
+from worker_utils import get_payload_len
 from workers.base_worker import BaseWorker
 
 StateDict = Dict[str, Any]
@@ -36,10 +37,10 @@ class TopWorker(BaseWorker):
         type_metadata = self.gateway_type_metadata()
         self.send_message(data=payload, type_metadata=type_metadata)
         logger.info(
-            "%s emitted %s result(s) for client %s",
+            "%s emitted %s result(s) for client %s\n%s",
             self.__class__.__name__,
-            len(payload) if hasattr(payload, "__len__") else 0,
-            client_id,
+            get_payload_len(payload),
+            client_id, payload
         )
     
     # @override

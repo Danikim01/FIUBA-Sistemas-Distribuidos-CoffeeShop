@@ -10,7 +10,6 @@ from message_utils import ClientId
 from worker_utils import run_main, safe_int_conversion
 from workers.top.top_worker import TopWorker
 
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
