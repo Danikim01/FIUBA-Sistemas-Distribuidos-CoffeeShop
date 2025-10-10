@@ -7,7 +7,7 @@ from collections import defaultdict
 from typing import Any, DefaultDict, Dict
 from message_utils import ClientId
 from worker_utils import extract_year_half, run_main, safe_float_conversion, safe_int_conversion
-from workers.top.top_worker import TopWorker
+from workers.aggregator.aggregator_worker import AggregatorWorker
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -17,7 +17,7 @@ StoreId = int
 
 # TPV (Total Payment Value) per each semester during 2024 and 2025, per branch, created between 06:00 AM and 11:00 PM.
 
-class TPVWorker(TopWorker):
+class TPVWorker(AggregatorWorker):
     """Computes Total Payment Value per semester for each store."""
 
     def __init__(self) -> None:

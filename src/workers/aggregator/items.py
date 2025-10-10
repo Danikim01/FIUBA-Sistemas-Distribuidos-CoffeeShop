@@ -3,12 +3,11 @@
 """Top items worker that aggregates per-month best sellers and profits."""
 
 import logging
-import os
 from collections import defaultdict
 from typing import Any, DefaultDict, Dict, List
 from message_utils import ClientId
 from worker_utils import extract_year_month, run_main, safe_float_conversion, safe_int_conversion
-from workers.top.top_worker import TopWorker
+from workers.aggregator.aggregator_worker import AggregatorWorker
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,7 +27,7 @@ def _new_monthly_quantity_map() -> DefaultDict[YearMonth, DefaultDict[ItemId, in
 def _new_monthly_profit_map() -> DefaultDict[YearMonth, DefaultDict[ItemId, float]]:
     return defaultdict(_new_profit_bucket)
 
-class TopItemsWorker(TopWorker):
+class ItemsWorker(AggregatorWorker):
     """Computes best-selling and most profitable items per month."""
 
     def __init__(self) -> None:
@@ -100,4 +99,4 @@ class TopItemsWorker(TopWorker):
         return [payload]
 
 if __name__ == '__main__':
-    run_main(TopItemsWorker)
+    run_main(ItemsWorker)

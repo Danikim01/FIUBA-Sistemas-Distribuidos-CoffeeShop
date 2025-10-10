@@ -10,7 +10,7 @@ from typing import Any, DefaultDict, Dict, List, Mapping
 from message_utils import ClientId
 from worker_utils import run_main, safe_int_conversion, top_items_sort_key
 from workers.extra_source.menu_items import MenuItemsExtraSource
-from workers.top.top_worker import TopWorker
+from workers.aggregator.aggregator_worker import AggregatorWorker
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -33,12 +33,12 @@ def _new_quantity_totals() -> QuantityTotals:
 def _new_profit_totals() -> ProfitTotals:
     return defaultdict(_new_profit_bucket)
 
-class FinalItemsAggregator(TopWorker):
+class FinalItemsAggregator(AggregatorWorker):
     """Aggregates per-client quantity and profit rankings across replicas."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.is_aggregator = True
+        self.chunk_payload = False
 
         self.top_per_month = safe_int_conversion(os.getenv("TOP_ITEMS_COUNT"), default=1)
 

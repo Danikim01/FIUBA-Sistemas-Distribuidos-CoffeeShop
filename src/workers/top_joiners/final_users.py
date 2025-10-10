@@ -8,21 +8,21 @@ from collections import defaultdict
 from typing import Any, DefaultDict, Dict, List
 from message_utils import ClientId
 from worker_utils import run_main, safe_int_conversion
+from workers.aggregator.aggregator_worker import AggregatorWorker
 from workers.extra_source.users import UsersExtraSource
 from workers.extra_source.stores import StoresExtraSource
-from workers.top.top_worker import TopWorker
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Birthday date of the 3 customers who have made the most purchases for each branch
 
-class TopClientsBirthdaysAggregator(TopWorker):
+class TopClientsBirthdaysAggregator(AggregatorWorker):
     """Aggregates top-client partials and injects client birthdays."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.is_aggregator = True
+        self.chunk_payload = False
         
         self.top_n = safe_int_conversion(os.getenv('TOP_USERS_COUNT'), default=3)
 

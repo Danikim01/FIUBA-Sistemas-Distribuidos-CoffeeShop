@@ -1,21 +1,21 @@
 from collections import defaultdict
 import logging
-from typing import Any, DefaultDict, Dict, List, Tuple
+from typing import Any, DefaultDict, Dict, List
 from message_utils import ClientId
+from workers.aggregator.aggregator_worker import AggregatorWorker
+from workers.aggregator.tpv import StoreId, YearHalf
 from workers.extra_source.stores import StoresExtraSource
-from workers.top.top_worker import TopWorker
 from worker_utils import normalize_tpv_entry, safe_int_conversion, tpv_sort_key, run_main
-from workers.top.tpv import StoreId, YearHalf
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # TPV (Total Payment Value) per each semester during 2024 and 2025, per branch, created between 06:00 AM and 11:00 PM.
 
-class TPVAggregator(TopWorker): 
+class TPVAggregator(AggregatorWorker): 
     def __init__(self) -> None:
         super().__init__()
-        self.is_aggregator = True
+        self.chunk_payload = False
         
         self.stores_source = StoresExtraSource(self.middleware_config)
         self.stores_source.start_consuming()

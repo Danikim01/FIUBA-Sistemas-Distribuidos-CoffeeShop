@@ -13,7 +13,6 @@ from workers.filter.filter_worker import FilterWorker
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
 class AmountFilterWorker(FilterWorker):
     """
     Worker that filters transactions by amount (>= 75).

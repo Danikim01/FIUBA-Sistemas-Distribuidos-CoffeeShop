@@ -14,12 +14,12 @@ StateDict = Dict[str, Any]
 T = TypeVar("T")
 
 
-class TopWorker(BaseWorker):
+class AggregatorWorker(BaseWorker):
     """Base class for single-source top workers with per-client state helpers."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.is_aggregator = False
+        self.chunk_payload: bool = True
 
     @abstractmethod
     def accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
@@ -56,11 +56,12 @@ class TopWorker(BaseWorker):
         payload = self.create_payload(self.current_client_id)
         if payload:
             self.reset_state(self.current_client_id)
-            if self.is_aggregator:
+            if self.chunk_payload:
                 self.send_payload(payload, self.current_client_id)
             else:
-                for item in payload:
-                    self.send_payload([item], self.current_client_id)
+                chunked_payloads = self._chunk_payload(payload, 5000)
+                for chunk in chunked_payloads:
+                    self.send_payload(chunk, self.current_client_id)
 
         super().handle_eof(message)
 
@@ -70,3 +71,7 @@ class TopWorker(BaseWorker):
     def process_batch(self, batch: list):
         for entry in batch:
             self.accumulate_transaction(self.current_client_id, entry)
+
+    def _chunk_payload(self, payload: list[Dict[str, Any]], chunk_size: int) -> list[list[Dict[str, Any]]]:
+        """Chunk the payload into smaller lists of a given size."""
+        return [payload[i:i + chunk_size] for i in range(0, len(payload), chunk_size)]

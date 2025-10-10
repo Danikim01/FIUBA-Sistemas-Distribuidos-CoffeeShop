@@ -1,6 +1,5 @@
 """Utility functions for worker operations."""
 
-import os
 import sys
 import logging
 from typing import Any, List, Optional, Tuple, Dict
