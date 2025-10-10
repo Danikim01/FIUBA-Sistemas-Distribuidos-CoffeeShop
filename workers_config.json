@@ -15,14 +15,14 @@
       "CHUNK_SIZE": 5000
     },
     "client": {
-      "count": 2,
+      "count": 3,
       "GATEWAY_HOST": "gateway",
       "GATEWAY_PORT": "12345",
       "BATCH_MAX_SIZE_KB": "512",
       "LOG_LEVEL": "INFO",
       "DATA_DIR": ".data",
       "REDUCED": false,
-      "MAX_SESSIONS": 1
+      "MAX_SESSIONS": 2
     }
   },
   "workers": {

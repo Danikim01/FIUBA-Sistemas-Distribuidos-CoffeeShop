@@ -351,15 +351,16 @@ def get_payload_len(payload: List[Dict[str, Any]]) -> int:
         return 0
 
     item0 = payload[0]
-    if not isinstance(item0, dict):
-        return len(payload)
+    qty = item0.get("quantity_totals")
+    prof = item0.get("profit_totals")
 
-    qty_totals = item0.get("quantity_totals") or {}
-    profit_totals = item0.get("profit_totals") or {}
+    is_items_payload: bool = (
+        len(payload) == 1
+        and isinstance(item0, dict)
+        and (isinstance(qty, dict) or isinstance(prof, dict))
+    )
 
-    if isinstance(qty_totals, dict) or isinstance(profit_totals, dict):
-        qty_count = sum(len(v) for v in qty_totals.values() if isinstance(v, dict))
-        prof_count = sum(len(v) for v in profit_totals.values() if isinstance(v, dict))
-        return qty_count + prof_count
+    if is_items_payload:
+        return len(qty or {}) + len(prof or {})
 
     return len(payload)
