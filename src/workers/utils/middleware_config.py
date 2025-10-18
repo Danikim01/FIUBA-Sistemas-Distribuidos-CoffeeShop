@@ -66,6 +66,10 @@ class MiddlewareConfig:
             port=self.rabbitmq_port,
             prefetch_count=self.prefetch_count
         )
+    
+    def create_eof_requeue(self) -> RabbitMQMiddlewareQueue:
+        name = self.input_queue + '_eof_requeue'
+        return self.create_queue(name)
 
     def get_input_target(self) -> str:
         if self.has_input_exchange():
