@@ -7,7 +7,7 @@ from collections import defaultdict
 from typing import Any, DefaultDict, Dict
 from message_utils import ClientId
 from worker_utils import extract_year_half, run_main, safe_float_conversion, safe_int_conversion
-from workers.aggregator.aggregator_worker import AggregatorWorker
+from workers.local_top_scaling.aggregator_worker import AggregatorWorker
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

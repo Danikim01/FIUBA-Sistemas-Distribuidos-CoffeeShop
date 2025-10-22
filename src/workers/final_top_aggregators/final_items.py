@@ -10,7 +10,7 @@ from typing import Any, DefaultDict, Dict, List, Mapping
 from message_utils import ClientId
 from worker_utils import run_main, safe_int_conversion, top_items_sort_key
 from workers.extra_source.menu_items import MenuItemsExtraSource
-from workers.aggregator.aggregator_worker import AggregatorWorker
+from workers.local_top_scaling.aggregator_worker import AggregatorWorker
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

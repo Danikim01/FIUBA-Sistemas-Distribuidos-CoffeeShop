@@ -2,8 +2,8 @@ from collections import defaultdict
 import logging
 from typing import Any, DefaultDict, Dict, List
 from message_utils import ClientId
-from workers.aggregator.aggregator_worker import AggregatorWorker
-from workers.aggregator.tpv import StoreId, YearHalf
+from workers.local_top_scaling.aggregator_worker import AggregatorWorker
+from workers.local_top_scaling.tpv import StoreId, YearHalf
 from workers.extra_source.stores import StoresExtraSource
 from worker_utils import normalize_tpv_entry, safe_int_conversion, tpv_sort_key, run_main
 

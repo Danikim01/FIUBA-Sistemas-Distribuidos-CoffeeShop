@@ -8,7 +8,7 @@ from collections import defaultdict
 from typing import Any, DefaultDict, Dict, List
 from message_utils import ClientId
 from worker_utils import run_main, safe_int_conversion
-from workers.aggregator.aggregator_worker import AggregatorWorker
+from workers.local_top_scaling.aggregator_worker import AggregatorWorker
 from workers.extra_source.users import UsersExtraSource
 from workers.extra_source.stores import StoresExtraSource
 

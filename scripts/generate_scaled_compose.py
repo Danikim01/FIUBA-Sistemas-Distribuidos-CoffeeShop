@@ -61,7 +61,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
     "tpv": {
         "display_name": "TPV Workers",
         "base_service_name": "tpv-worker",
-        "command": ["python", "aggregator/tpv.py"],
+        "command": ["python", "local_top_scaling/tpv.py"],
         "needs_worker_id": True,
         "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": True,
@@ -69,7 +69,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
     "tpv_aggregator": {
         "display_name": "TPV Aggregator",
         "base_service_name": "tpv-aggregator",
-        "command": ["python", "top_joiners/final_tvp.py"],
+        "command": ["python", "final_top_aggregators/final_tvp.py"],
         "needs_worker_id": False,
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": False,
@@ -77,7 +77,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
     "items_top": {
         "display_name": "Top Items Workers",
         "base_service_name": "items-top-worker",
-        "command": ["python", "aggregator/items.py"],
+        "command": ["python", "local_top_scaling/items.py"],
         "needs_worker_id": True,
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": True,
@@ -85,7 +85,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
     "items_aggregator": {
         "display_name": "Top Items Aggregator",
         "base_service_name": "items-aggregator",
-        "command": ["python", "top_joiners/final_items.py"],
+        "command": ["python", "final_top_aggregators/final_items.py"],
         "needs_worker_id": False,
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": False,
@@ -93,7 +93,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
     "top_clients": {
         "display_name": "Top Clients Workers",
         "base_service_name": "top-clients-worker",
-        "command": ["python", "aggregator/users.py"],
+        "command": ["python", "local_top_scaling/users.py"],
         "needs_worker_id": True,
         "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": True,
@@ -101,7 +101,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
     "top_clients_birthdays": {
         "display_name": "Top Clients Birthdays Aggregator",
         "base_service_name": "top-clients-birthdays-aggregator",
-        "command": ["python", "top_joiners/final_users.py"],
+        "command": ["python", "final_top_aggregators/final_users.py"],
         "needs_worker_id": False,
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": False,
