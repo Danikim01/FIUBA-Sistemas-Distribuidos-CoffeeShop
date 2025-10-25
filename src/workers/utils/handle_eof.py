@@ -46,6 +46,26 @@ class EOFHandler:
             logger.info(f"Worker {self.worker_id}: Outputting EOF for client {client_id} with counter {counter}")
             self.output_eof(client_id=client_id)
         else:
+            logger.info(f"Worker {self.worker_id}: Requeuing EOF for client {client_id} with counter {counter}")
+            self.requeue_eof(client_id=client_id, counter=counter)
+
+    def handle_eof_with_routing_key(self, message: Dict[str, Any], client_id: ClientId, routing_key: str = "", exchange: str = ""):
+        """Handle EOF message with specific routing key.
+        
+        Args:
+            message: EOF message dictionary
+            client_id: Client identifier
+            routing_key: Routing key for the message
+        """
+        _, message = extract_data_and_client_id(message)
+
+        counter = self.get_counter(message)
+
+        if self.should_output(counter):
+            logger.info(f"Worker {self.worker_id}: Outputting EOF for client {client_id} with counter {counter}")
+            self.output_eof_with_routing_key(client_id=client_id, routing_key=routing_key, exchange=exchange)
+        else:
+            logger.info(f"Worker {self.worker_id}: Requeuing EOF for client {client_id} with counter {counter}")
             self.requeue_eof(client_id=client_id, counter=counter)
 
     def get_counter(self, message: Dict[str, Any]) -> Counter:
@@ -57,6 +77,7 @@ class EOFHandler:
             Counter dictionary
         """
         additional_data: Dict[str, Any] = extract_eof_metadata(message)
+        logger.info(f"EOF metadata fields: {additional_data}")
         counter: Dict[str, int] = additional_data.get('counter', {})
         counter[self.worker_id] = counter.get(self.worker_id, 0) + 1
         return counter
@@ -85,6 +106,26 @@ class EOFHandler:
         message = create_message_with_metadata(client_id, data=None, message_type='EOF')
         publisher = self._get_output_publisher()
         publisher.send(message)
+    
+    def output_eof_with_routing_key(self, client_id: ClientId, routing_key: str = "", exchange: str = ""):
+        """Send EOF message to output with specific routing key.
+        
+        Args:
+            client_id: Client identifier
+            routing_key: Routing key for the message
+        """
+        message = create_message_with_metadata(client_id, data=None, message_type='EOF')
+        publisher = self._get_output_publisher()
+        
+        logger.info(f"Sending eof message to routing key {routing_key} with exchange {exchange}")
+        logger.info(f"EOF message: {message}")
+        
+        try:
+            publisher.send(message, routing_key=routing_key, exchange=exchange)
+            logger.info(f"[MESSAGE UTILS] Additional metadata: {message.get('counter', {})}")
+        except Exception as exc:
+            logger.error(f"Failed to send EOF with routing key {routing_key}: {exc}")
+            raise
 
     def requeue_eof(self, client_id: ClientId, counter: Counter):
         """Requeue an EOF message back to the input middleware.
@@ -99,6 +140,7 @@ class EOFHandler:
             counter=dict(counter),
         )
         publisher = self._get_requeue_publisher()
+        logger.info(f"Worker {self.worker_id}: Requeuing EOF to queue {publisher.queue_name} for client {client_id}")
         publisher.send(message)
 
     def _get_output_publisher(self):
@@ -123,13 +165,14 @@ class EOFHandler:
         """Start the consuming thread."""
         def _start_consuming():
             try:
+                logger.info(f"[DEBUG] Worker {self.worker_id} starting EOF consumer for queue: {self.eof_consumer.queue_name}")
                 self.eof_consumer.start_consuming(on_message)
             except Exception as exc:  # noqa: BLE001
                 logger.error("Error consuming EOF messages: %s", exc)
             finally:
                 self.consuming_thread = None
         if not self.consuming_thread or not self.consuming_thread.is_alive():
-            logger.info("Starting EOF handler consuming thread")
+            logger.info(f"[DEBUG] Starting EOF handler consuming thread for worker {self.worker_id}")
             self.consuming_thread = threading.Thread(target=_start_consuming, daemon=True)
             self.consuming_thread.start()
 

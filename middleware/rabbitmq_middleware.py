@@ -280,7 +280,7 @@ class RabbitMQMiddlewareQueue(_BaseRabbitMQMiddleware):
 
             self._wait_before_retry(attempt - 1)
 
-    def send(self, message: Any) -> None:
+    def send(self, message: Any, routing_key: str = "", exchange: str = "") -> None:
         payload = serialize_message(message).encode("utf-8")
         attempt = 0
 
@@ -296,8 +296,8 @@ class RabbitMQMiddlewareQueue(_BaseRabbitMQMiddleware):
                     channel.confirm_delivery()
 
                 channel.basic_publish(
-                    exchange="",
-                    routing_key=self.queue_name,
+                    exchange=exchange if exchange else "",
+                    routing_key=self.queue_name if not routing_key else routing_key,
                     body=payload,
                 )
                 return
@@ -513,7 +513,7 @@ class RabbitMQMiddlewareExchange(_BaseRabbitMQMiddleware):
 
             self._wait_before_retry(attempt - 1)
 
-    def send(self, message: Any, routing_key: str = "") -> None:
+    def send(self, message: Any, routing_key: str = "", exchange: str = "") -> None:
         payload = serialize_message(message).encode("utf-8")
         attempt = 0
 

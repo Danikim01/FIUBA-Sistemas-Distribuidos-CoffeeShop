@@ -15,13 +15,13 @@
       "CHUNK_SIZE": 5000
     },
     "client": {
-      "count": 1,
+      "count": 2,
       "GATEWAY_HOST": "gateway",
       "GATEWAY_PORT": "12345",
       "BATCH_MAX_SIZE_KB": "512",
       "LOG_LEVEL": "INFO",
       "DATA_DIR": ".data",
-      "REDUCED": false,
+      "REDUCED": true,
       "MAX_SESSIONS": 1
     }
   },
@@ -64,6 +64,24 @@
         "OUTPUT_QUEUE": "tpv_partial"
       }
     },
+    "tpv_sharding_router": {
+      "count": 1,
+      "environment": {
+        "INPUT_EXCHANGE": "transactions_time_filtered",
+        "INPUT_QUEUE": "transactions_time_filtered_tpv_sharding_router",
+        "OUTPUT_EXCHANGE": "transactions_time_filtered_tpv_sharded",
+        "NUM_SHARDS": "2"
+      }
+    },
+    "tpv_sharded": {
+      "count": 2,
+      "environment": {
+        "INPUT_EXCHANGE": "transactions_time_filtered_tpv_sharded",
+        "INPUT_QUEUE": "transactions_time_filtered_tpv_shard",
+        "OUTPUT_QUEUE": "tpv_partial",
+        "NUM_SHARDS": "2"
+      }
+    },
     "items_top": {
       "count": 2,
       "environment": {
@@ -71,12 +89,39 @@
         "OUTPUT_QUEUE": "top_items_partial"
       }
     },
-    "top_clients": {
+    "items_sharding_router": {
+      "count": 1,
+      "environment": {
+        "INPUT_QUEUE": "transaction_items_year_filtered",
+        "OUTPUT_EXCHANGE": "transaction_items_year_filtered_sharded",
+        "NUM_SHARDS": "2"
+      }
+    },
+    "items_sharded": {
+      "count": 2,
+      "environment": {
+        "INPUT_EXCHANGE": "transaction_items_year_filtered_sharded",
+        "INPUT_QUEUE": "transaction_items_year_filtered_shard",
+        "OUTPUT_QUEUE": "top_items_partial",
+        "NUM_SHARDS": "2"
+      }
+    },
+    "top_clients_sharding_router": {
       "count": 1,
       "environment": {
         "INPUT_EXCHANGE": "transactions_year_filtered",
-        "INPUT_QUEUE": "transactions_year_filtered_top_clients",
-        "OUTPUT_QUEUE": "top_clients_partial"
+        "INPUT_QUEUE": "transactions_year_filtered_sharding_router",
+        "OUTPUT_EXCHANGE": "transactions_year_filtered_sharded",
+        "NUM_SHARDS": "2"
+      }
+    },
+    "top_clients": {
+      "count": 2,
+      "environment": {
+        "INPUT_EXCHANGE": "transactions_year_filtered_sharded",
+        "INPUT_QUEUE": "transactions_year_filtered_shard",
+        "OUTPUT_QUEUE": "top_clients_partial",
+        "NUM_SHARDS": "2"
       }
     },
     "items_aggregator": {

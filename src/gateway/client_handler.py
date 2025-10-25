@@ -149,9 +149,13 @@ class ClientHandler:
                 return
 
             try:
+                logger.info(f"Gateway payload keys: {list(payload.keys()) if isinstance(payload, dict) else 'Not a dict'}")
+                logger.info(f"Gateway payload type_metadata: {payload.get('type_metadata', 'NO_METADATA')}")
                 normalized_messages = normalize_queue_message(payload)
+                logger.info(f"Gateway normalized messages for client {client_id}: {normalized_messages}")
+                
                 if not normalized_messages:
-                    logger.debug(
+                    logger.warning(
                         "Discarding unrecognized result payload for client %s: %s",
                         client_id,
                         payload,
@@ -161,10 +165,11 @@ class ClientHandler:
                 for result_payload in normalized_messages:
                     enriched_payload = dict(result_payload)
                     enriched_payload['client_id'] = client_id
-                    logger.debug(
-                        "Gateway sending normalized result to client %s: %s",
+                    logger.info(
+                        "Gateway sending normalized result to client %s: type=%s, results_count=%s",
                         client_id,
-                        enriched_payload,
+                        enriched_payload.get('type'),
+                        len(enriched_payload.get('results', [])) if isinstance(enriched_payload.get('results'), list) else 'N/A'
                     )
                     self._send_json_line(client_socket, enriched_payload)
             except Exception as exc:

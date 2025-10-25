@@ -17,4 +17,4 @@ else
     scripts/generate_scaled_compose.py --config "${CONFIG_PATH}" --output docker-compose.yml --scale "$WORKER_COUNT"
 fi
 
-docker compose up --build -d --force-recreate --remove-orphans
+#docker compose up --build -d --force-recreate --remove-orphans

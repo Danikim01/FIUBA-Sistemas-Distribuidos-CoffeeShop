@@ -66,6 +66,22 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": True,
     },
+    "tpv_sharding_router": {
+        "display_name": "TPV Sharding Router",
+        "base_service_name": "tpv-sharding-router",
+        "command": ["python", "sharding/tpv_sharding_router.py"],
+        "needs_worker_id": False,
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_EXCHANGE", "NUM_SHARDS"],
+        "scalable": False,
+    },
+    "tpv_sharded": {
+        "display_name": "TPV Sharded Workers",
+        "base_service_name": "tpv-worker-sharded",
+        "command": ["python", "local_top_scaling/tpv_sharded.py"],
+        "needs_worker_id": True,
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE", "NUM_SHARDS"],
+        "scalable": True,
+    },
     "tpv_aggregator": {
         "display_name": "TPV Aggregator",
         "base_service_name": "tpv-aggregator",
@@ -82,6 +98,22 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": True,
     },
+    "items_sharding_router": {
+        "display_name": "Items Sharding Router",
+        "base_service_name": "items-sharding-router",
+        "command": ["python", "sharding/items_sharding_router.py"],
+        "needs_worker_id": False,
+        "required_environment": ["INPUT_QUEUE", "OUTPUT_EXCHANGE", "NUM_SHARDS"],
+        "scalable": False,
+    },
+    "items_sharded": {
+        "display_name": "Items Sharded Workers",
+        "base_service_name": "items-worker-sharded",
+        "command": ["python", "local_top_scaling/items_sharded.py"],
+        "needs_worker_id": True,
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE", "NUM_SHARDS"],
+        "scalable": True,
+    },
     "items_aggregator": {
         "display_name": "Top Items Aggregator",
         "base_service_name": "items-aggregator",
@@ -90,12 +122,20 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": False,
     },
+    "top_clients_sharding_router": {
+        "display_name": "Top Clients Sharding Router",
+        "base_service_name": "top-clients-sharding-router",
+        "command": ["python", "sharding/sharding_router.py"],
+        "needs_worker_id": False,
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_EXCHANGE", "NUM_SHARDS"],
+        "scalable": False,
+    },
     "top_clients": {
         "display_name": "Top Clients Workers",
-        "base_service_name": "top-clients-worker",
-        "command": ["python", "local_top_scaling/users.py"],
+        "base_service_name": "top-clients-worker-sharded",
+        "command": ["python", "local_top_scaling/users_sharded.py"],
         "needs_worker_id": True,
-        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE"],
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE", "NUM_SHARDS"],
         "scalable": True,
     },
     "top_clients_birthdays": {
@@ -364,6 +404,9 @@ def format_command(command: List[str]) -> str:
 def build_service_name(base_service: str, index: int, total_count: int) -> str:
     if total_count == 1:
         return base_service
+    # For sharded workers, use 0-based indexing (0, 1, 2, ...)
+    if "sharded" in base_service:
+        return f"{base_service}-{index - 1}"
     return f"{base_service}-{index}"
 
 
@@ -371,6 +414,7 @@ def generate_worker_sections(
     workers: Dict[str, WorkerConfig],
     common_env: Dict[str, str],
     global_prefetch: Optional[str],
+    is_reduced_dataset: bool = False,
 ) -> List[str]:
     sections: List[str] = []
 
@@ -380,6 +424,18 @@ def generate_worker_sections(
             continue
 
         meta = WORKER_DEFINITIONS[key]
+        
+        # Skip old workers if sharded versions exist
+        if key == "tpv" and "tpv_sharded" in workers:
+            continue
+        if key == "items_top" and "items_sharded" in workers and not is_reduced_dataset:
+            continue
+        
+        # Skip items sharding for reduced dataset (only January data)
+        if is_reduced_dataset and key in ["items_sharding_router", "items_sharded"]:
+            continue
+            
+        # Note: top_clients is already the sharded version, so we don't skip it
         total_count = worker_cfg.count
         plural = "instancias" if total_count != 1 else "instancia"
         sections.append(f"  # {meta['display_name']} ({total_count} {plural})")
@@ -403,8 +459,33 @@ def generate_worker_sections(
             if global_prefetch is not None and "PREFETCH_COUNT" not in environment:
                 environment["PREFETCH_COUNT"] = global_prefetch
             environment.setdefault("REPLICA_COUNT", str(total_count))
+            
+            # Special handling for sharding router
+            if "sharding_router" in key:
+                environment.setdefault("BATCH_SIZE", "100")
+                environment.setdefault("BATCH_TIMEOUT", "1.0")
+                environment["REPLICA_COUNT"] = "1"  # Sharding router is always single instance
+            
+            # Special handling for sharded workers - fix queue names and add sharded flag
+            if "sharded" in meta["base_service_name"]:
+                # Add IS_SHARDED_WORKER flag for sharded workers
+                environment["IS_SHARDED_WORKER"] = "True"
+                # Fix the INPUT_QUEUE to include the shard number
+                if "INPUT_QUEUE" in environment:
+                    base_queue = environment["INPUT_QUEUE"]
+                    if not base_queue.endswith("_0") and not base_queue.endswith("_1"):
+                        environment["INPUT_QUEUE"] = f"{base_queue}_{index - 1}"
+            
             if meta["needs_worker_id"]:
-                environment["WORKER_ID"] = str(index)
+                # For sharded workers, use 0-based indexing (0, 1, 2, ...)
+                # For regular workers, use 1-based indexing (1, 2, 3, ...)
+                if "sharded" in meta["base_service_name"] or "top_clients" in key:
+                    environment["WORKER_ID"] = str(index - 1)  # 0-based for sharded workers
+                else:
+                    environment["WORKER_ID"] = str(index)  # 1-based for regular workers
+            elif "sharding_router" in key:
+                # Sharding routers should use 0-based indexing to match sharded workers
+                environment["WORKER_ID"] = str(index - 1)  # 0-based for sharding routers
 
             if environment:
                 lines.append("    environment:")
@@ -428,8 +509,13 @@ def generate_compose(config: Dict[str, Any]) -> str:
     common_env_raw = config.get("common_environment", {})
     common_env, global_prefetch = parse_common_environment(common_env_raw)
 
+    # Check if this is a reduced dataset (only January data)
+    service_env = config.get("service_environment", {})
+    client_config = service_env.get("client", {})
+    is_reduced_dataset = client_config.get("REDUCED", False)
+
     worker_settings = load_worker_settings(raw_workers)
-    worker_sections = generate_worker_sections(worker_settings, common_env, global_prefetch)
+    worker_sections = generate_worker_sections(worker_settings, common_env, global_prefetch, is_reduced_dataset)
 
     base_services = render_base_services(config.get("service_environment"), common_env)
 

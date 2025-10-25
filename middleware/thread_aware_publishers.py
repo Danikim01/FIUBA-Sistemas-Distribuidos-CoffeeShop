@@ -14,8 +14,6 @@ from .rabbitmq_middleware import (
 
 QueueFactory = Callable[[], RabbitMQMiddlewareQueue]
 ExchangeFactory = Callable[[], RabbitMQMiddlewareExchange]
-
-
 class ThreadAwareQueuePublisher:
     """Provide a thread-local view over a queue publisher.
 

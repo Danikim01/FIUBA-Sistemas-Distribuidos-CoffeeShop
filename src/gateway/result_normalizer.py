@@ -82,6 +82,10 @@ def _normalize_with_metadata(data: Any, metadata: Dict[str, Any]) -> List[Result
     normalized: List[ResultMessage] = []
 
     list_type = metadata.get("list_type")
+    bundle_types = metadata.get("bundle_types")
+
+    logger.info(f"[RESULT NORMALIZER] Bundle types: {bundle_types}")
+
     if list_type and isinstance(data, list):
         normalized.append(
             {
@@ -90,8 +94,6 @@ def _normalize_with_metadata(data: Any, metadata: Dict[str, Any]) -> List[Result
             }
         )
         return normalized
-
-    bundle_types = metadata.get("bundle_types")
     if bundle_types:
         candidates: List[Dict[str, Any]] = []
         if isinstance(data, dict):
@@ -133,6 +135,7 @@ def _normalize_data_list(
         return typed_entries
 
     first_entry = rows[0]
+    #check if metadata has bundle_types field
     if isinstance(first_entry, dict) and {"quantity", "profit"}.issubset(first_entry.keys()):
         return _normalize_quantity_profit_bundle(first_entry)
 
@@ -198,11 +201,13 @@ def _normalize_data_dict(
     metadata = metadata or {}
 
     if metadata:
+        if metadata.get("bundle_types"):
+            logger.info(f"[RESULT NORMALIZER] Metadata with bundle types: {metadata}")
         meta_normalized = _normalize_with_metadata(data, metadata)
         if meta_normalized:
             return meta_normalized
 
-    if {"quantity", "profit"}.issubset(data.keys()):
+    if {"quantity", "profit"}.issubset(data.keys()) or metadata.get("bundle_types"):
         return _normalize_quantity_profit_bundle(data)
 
     results_section = data.get("results")
@@ -234,13 +239,16 @@ def normalize_queue_message(message: Dict[str, Any]) -> List[ResultMessage]:
     """Normalize a raw queue message into one or more client payloads."""
 
     message_type = str(message.get("type") or "").upper()
+    raw_metadata = message.get("type_metadata")
+    if raw_metadata:
+        logger.info(f"[RESULT NORMALIZER] Raw metadata: {raw_metadata}")
+
     if message_type == "EOF":
         return []
 
     normalized: List[ResultMessage] = []
 
     metadata: Dict[str, Any] = {}
-    raw_metadata = message.get("type_metadata")
     if isinstance(raw_metadata, dict):
         metadata = raw_metadata
 

@@ -327,6 +327,8 @@ class ResultsHandler:
             logger.warning("Ignorando payload de resultado inesperado: %s", result)
             return True
 
+        logger.info(f"Client received result: {result}")
+
         message_client_id = result.get("client_id")
         if message_client_id:
             if message_client_id != self.current_client_id:
@@ -341,6 +343,8 @@ class ResultsHandler:
 
         message_type = result.get("type")
         normalized_type = str(message_type).upper() if message_type else ""
+        
+        logger.info(f"Processing result type: {normalized_type} for client {client_id}")
 
         if normalized_type == "EOF":
             self._finalize_amount_transactions_validation()
@@ -350,6 +354,7 @@ class ResultsHandler:
             self._validate_result(normalized_type, rendered or [])
             return True
         if normalized_type == "TOP_ITEMS_BY_QUANTITY":
+            logger.info(f"Processing TOP_ITEMS_BY_QUANTITY for client {client_id}: {result}")
             rendered = self._render_top_items_table(
                 result,
                 "TOP ÍTEMS POR CANTIDAD (2024-2025, 06:00-23:00)",
@@ -357,9 +362,11 @@ class ResultsHandler:
                 "top_items_by_quantity.txt",
                 client_id,
             )
+            logger.info(f"Rendered {len(rendered)} quantity results for client {client_id}")
             self._validate_result(normalized_type, rendered or [])
             return True
         if normalized_type == "TOP_ITEMS_BY_PROFIT":
+            logger.info(f"Processing TOP_ITEMS_BY_PROFIT for client {client_id}: {result}")
             rendered = self._render_top_items_table(
                 result,
                 "TOP ÍTEMS POR GANANCIA (2024-2025, 06:00-23:00)",
@@ -367,6 +374,7 @@ class ResultsHandler:
                 "top_items_by_profit.txt",
                 client_id,
             )
+            logger.info(f"Rendered {len(rendered)} profit results for client {client_id}")
             self._validate_result(normalized_type, rendered or [])
             return True
         if normalized_type == "TOP_CLIENTS_BIRTHDAYS":

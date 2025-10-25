@@ -1,0 +1,525 @@
+services:
+  # RabbitMQ Server
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: rabbitmq-server
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    networks:
+      - middleware-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+  # Gateway Service
+  gateway:
+    build:
+      context: .
+      dockerfile: ./src/gateway/Dockerfile
+    container_name: coffee-gateway
+    ports:
+      - "12345:12345"
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - OUTPUT_QUEUE=transactions_raw
+      - RESULTS_QUEUE=gateway_results
+      - STORES_EXCHANGE=stores_raw
+      - USERS_QUEUE=users_raw
+      - TRANSACTION_ITEMS_QUEUE=transaction_items_raw
+      - MENU_ITEMS_QUEUE=menu_items_raw
+      - CHUNK_SIZE=5000
+    restart: unless-stopped
+
+  # Client Service (2 instancias)
+  client-1:
+    build:
+      context: ./src/client
+      dockerfile: Dockerfile
+    container_name: coffee-client-1
+    networks:
+      - middleware-network
+    depends_on:
+      - gateway
+      - rabbitmq
+    environment:
+      - count=2
+      - GATEWAY_HOST=gateway
+      - GATEWAY_PORT=12345
+      - BATCH_MAX_SIZE_KB=512
+      - LOG_LEVEL=INFO
+      - DATA_DIR=.data
+      - REDUCED=True
+      - MAX_SESSIONS=1
+    volumes:
+      - ./src/client/.data:/app/.data:ro
+      - ./results:/app/.results
+
+  client-2:
+    build:
+      context: ./src/client
+      dockerfile: Dockerfile
+    container_name: coffee-client-2
+    networks:
+      - middleware-network
+    depends_on:
+      - gateway
+      - rabbitmq
+    environment:
+      - count=2
+      - GATEWAY_HOST=gateway
+      - GATEWAY_PORT=12345
+      - BATCH_MAX_SIZE_KB=512
+      - LOG_LEVEL=INFO
+      - DATA_DIR=.data
+      - REDUCED=True
+      - MAX_SESSIONS=1
+    volumes:
+      - ./src/client/.data:/app/.data:ro
+      - ./results:/app/.results
+
+  # Year Filter Workers (2 instancias)
+  year-filter-worker-1:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: year-filter-worker-1
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_QUEUE=transactions_raw
+      - OUTPUT_EXCHANGE=transactions_year_filtered
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=2
+      - WORKER_ID=1
+    command: ["python", "filter/year.py"]
+    restart: unless-stopped
+  year-filter-worker-2:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: year-filter-worker-2
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_QUEUE=transactions_raw
+      - OUTPUT_EXCHANGE=transactions_year_filtered
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=2
+      - WORKER_ID=2
+    command: ["python", "filter/year.py"]
+    restart: unless-stopped
+
+  # Items Year Filter Workers (2 instancias)
+  items-year-filter-worker-1:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: items-year-filter-worker-1
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_QUEUE=transaction_items_raw
+      - OUTPUT_QUEUE=transaction_items_year_filtered
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=2
+      - WORKER_ID=1
+    command: ["python", "filter/year.py"]
+    restart: unless-stopped
+  items-year-filter-worker-2:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: items-year-filter-worker-2
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_QUEUE=transaction_items_raw
+      - OUTPUT_QUEUE=transaction_items_year_filtered
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=2
+      - WORKER_ID=2
+    command: ["python", "filter/year.py"]
+    restart: unless-stopped
+
+  # Time Filter Workers (2 instancias)
+  time-filter-worker-1:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: time-filter-worker-1
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transactions_year_filtered
+      - INPUT_QUEUE=transactions_year_filtered_time
+      - OUTPUT_EXCHANGE=transactions_time_filtered
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=2
+      - WORKER_ID=1
+    command: ["python", "filter/time.py"]
+    restart: unless-stopped
+  time-filter-worker-2:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: time-filter-worker-2
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transactions_year_filtered
+      - INPUT_QUEUE=transactions_year_filtered_time
+      - OUTPUT_EXCHANGE=transactions_time_filtered
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=2
+      - WORKER_ID=2
+    command: ["python", "filter/time.py"]
+    restart: unless-stopped
+
+  # Amount Filter Workers (2 instancias)
+  amount-filter-worker-1:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: amount-filter-worker-1
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transactions_time_filtered
+      - INPUT_QUEUE=transactions_time_filtered_amount
+      - OUTPUT_QUEUE=gateway_results
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=2
+      - WORKER_ID=1
+    command: ["python", "filter/amount.py"]
+    restart: unless-stopped
+  amount-filter-worker-2:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: amount-filter-worker-2
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transactions_time_filtered
+      - INPUT_QUEUE=transactions_time_filtered_amount
+      - OUTPUT_QUEUE=gateway_results
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=2
+      - WORKER_ID=2
+    command: ["python", "filter/amount.py"]
+    restart: unless-stopped
+
+  # TPV Sharding Router (1 instancia)
+  tpv-sharding-router:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: tpv-sharding-router
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transactions_time_filtered
+      - INPUT_QUEUE=transactions_time_filtered_tpv_sharding_router
+      - OUTPUT_EXCHANGE=transactions_time_filtered_tpv_sharded
+      - NUM_SHARDS=2
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=1
+      - BATCH_SIZE=100
+      - BATCH_TIMEOUT=1.0
+      - WORKER_ID=0
+    command: ["python", "sharding/tpv_sharding_router.py"]
+    restart: unless-stopped
+
+  # TPV Sharded Workers (2 instancias)
+  tpv-worker-sharded-0:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: tpv-worker-sharded-0
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transactions_time_filtered_tpv_sharded
+      - INPUT_QUEUE=transactions_time_filtered_tpv_shard_0
+      - OUTPUT_QUEUE=tpv_partial
+      - NUM_SHARDS=2
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=2
+      - IS_SHARDED_WORKER=True
+      - WORKER_ID=0
+    command: ["python", "local_top_scaling/tpv_sharded.py"]
+    restart: unless-stopped
+  tpv-worker-sharded-1:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: tpv-worker-sharded-1
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transactions_time_filtered_tpv_sharded
+      - INPUT_QUEUE=transactions_time_filtered_tpv_shard_1
+      - OUTPUT_QUEUE=tpv_partial
+      - NUM_SHARDS=2
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=2
+      - IS_SHARDED_WORKER=True
+      - WORKER_ID=1
+    command: ["python", "local_top_scaling/tpv_sharded.py"]
+    restart: unless-stopped
+
+  # TPV Aggregator (1 instancia)
+  tpv-aggregator:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: tpv-aggregator
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_QUEUE=tpv_partial
+      - OUTPUT_QUEUE=gateway_results
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=1
+    command: ["python", "final_top_aggregators/final_tvp.py"]
+    restart: unless-stopped
+
+  # Top Items Workers (2 instancias)
+  items-top-worker-1:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: items-top-worker-1
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_QUEUE=transaction_items_year_filtered
+      - OUTPUT_QUEUE=top_items_partial
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=2
+      - WORKER_ID=1
+    command: ["python", "local_top_scaling/items.py"]
+    restart: unless-stopped
+  items-top-worker-2:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: items-top-worker-2
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_QUEUE=transaction_items_year_filtered
+      - OUTPUT_QUEUE=top_items_partial
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=2
+      - WORKER_ID=2
+    command: ["python", "local_top_scaling/items.py"]
+    restart: unless-stopped
+
+  # Top Items Aggregator (1 instancia)
+  items-aggregator:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: items-aggregator
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_QUEUE=top_items_partial
+      - OUTPUT_QUEUE=gateway_results
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=1
+    command: ["python", "final_top_aggregators/final_items.py"]
+    restart: unless-stopped
+
+  # Top Clients Sharding Router (1 instancia)
+  top-clients-sharding-router:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: top-clients-sharding-router
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transactions_year_filtered
+      - INPUT_QUEUE=transactions_year_filtered_sharding_router
+      - OUTPUT_EXCHANGE=transactions_year_filtered_sharded
+      - NUM_SHARDS=2
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=1
+      - BATCH_SIZE=100
+      - BATCH_TIMEOUT=1.0
+      - WORKER_ID=0
+    command: ["python", "sharding/sharding_router.py"]
+    restart: unless-stopped
+
+  # Top Clients Workers (2 instancias)
+  top-clients-worker-sharded-0:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: top-clients-worker-sharded-0
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transactions_year_filtered_sharded
+      - INPUT_QUEUE=transactions_year_filtered_shard_0
+      - OUTPUT_QUEUE=top_clients_partial
+      - NUM_SHARDS=2
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=2
+      - IS_SHARDED_WORKER=True
+      - WORKER_ID=0
+    command: ["python", "local_top_scaling/users_sharded.py"]
+    restart: unless-stopped
+  top-clients-worker-sharded-1:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: top-clients-worker-sharded-1
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transactions_year_filtered_sharded
+      - INPUT_QUEUE=transactions_year_filtered_shard_1
+      - OUTPUT_QUEUE=top_clients_partial
+      - NUM_SHARDS=2
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=2
+      - IS_SHARDED_WORKER=True
+      - WORKER_ID=1
+    command: ["python", "local_top_scaling/users_sharded.py"]
+    restart: unless-stopped
+
+  # Top Clients Birthdays Aggregator (1 instancia)
+  top-clients-birthdays-aggregator:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: top-clients-birthdays-aggregator
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_QUEUE=top_clients_partial
+      - OUTPUT_QUEUE=gateway_results
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=1
+    command: ["python", "final_top_aggregators/final_users.py"]
+    restart: unless-stopped
+
+networks:
+  middleware-network:
+    driver: bridge
+
+volumes:
+  rabbitmq_data:
+

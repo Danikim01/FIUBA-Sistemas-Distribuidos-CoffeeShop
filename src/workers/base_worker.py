@@ -60,15 +60,21 @@ class BaseWorker(ABC):
         # Clean up resources
         self.cleanup()
     
-    def send_message(self, client_id: ClientId, data: Any, **metadata):
+    def send_message(self, client_id: ClientId, data: Any, routing_key: str = None ,  **metadata):
         """Send a message to the output with client metadata.
         
         Args:
             data: The actual data to send
-            **metadata: Additional metadata fields
+            **metadata: Additional metadata fields (including routing_key for exchanges)
         """
         message = create_message_with_metadata(client_id, data, **metadata)
-        self.middleware_config.output_middleware.send(message)
+        
+        # Send message with routing_key if it's an exchange middleware
+        if routing_key:
+            logger.info(f"[WORKER {self.__class__.__name__}] Sending message to routing key: {routing_key}")
+            self.middleware_config.output_middleware.send(message, routing_key=routing_key)
+        else:
+            self.middleware_config.output_middleware.send(message)
     
     @abstractmethod
     def process_message(self, message: dict, client_id: ClientId):

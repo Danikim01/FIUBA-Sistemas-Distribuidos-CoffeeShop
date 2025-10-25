@@ -63,6 +63,9 @@ def create_message_with_metadata(
         message['type'] = data['type']
         logger.debug("Inheriting message type from data: %s", data['type'])
 
+    if additional_metadata:
+        logger.info(f"[MESSAGE UTILS] Additional metadata: {additional_metadata}")
+
     message.update(additional_metadata)
     return message
 
