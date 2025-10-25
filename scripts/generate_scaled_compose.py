@@ -100,7 +100,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
     },
     "top_clients": {
         "display_name": "Top Clients Workers",
-        "base_service_name": "top-clients-worker",
+        "base_service_name": "top-clients-worker-sharded",
         "command": ["python", "local_top_scaling/users_sharded.py"],
         "needs_worker_id": True,
         "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE", "NUM_SHARDS"],
@@ -372,6 +372,9 @@ def format_command(command: List[str]) -> str:
 def build_service_name(base_service: str, index: int, total_count: int) -> str:
     if total_count == 1:
         return base_service
+    # For sharded workers, use 0-based indexing (0, 1, 2, ...)
+    if "sharded" in base_service:
+        return f"{base_service}-{index - 1}"
     return f"{base_service}-{index}"
 
 
@@ -411,10 +414,25 @@ def generate_worker_sections(
             if global_prefetch is not None and "PREFETCH_COUNT" not in environment:
                 environment["PREFETCH_COUNT"] = global_prefetch
             environment.setdefault("REPLICA_COUNT", str(total_count))
+            
+            # Special handling for sharding router
+            if "sharding_router" in key:
+                environment.setdefault("BATCH_SIZE", "100")
+                environment.setdefault("BATCH_TIMEOUT", "1.0")
+                environment["REPLICA_COUNT"] = "1"  # Sharding router is always single instance
+            
+            # Special handling for sharded workers - fix queue names
+            if "sharded" in meta["base_service_name"]:
+                # Fix the INPUT_QUEUE to include the shard number
+                if "INPUT_QUEUE" in environment:
+                    base_queue = environment["INPUT_QUEUE"]
+                    if not base_queue.endswith("_0") and not base_queue.endswith("_1"):
+                        environment["INPUT_QUEUE"] = f"{base_queue}_{index - 1}"
+            
             if meta["needs_worker_id"]:
                 # For sharded workers, use 0-based indexing (0, 1, 2, ...)
                 # For regular workers, use 1-based indexing (1, 2, 3, ...)
-                if "sharded" in key or "top_clients" in key:
+                if "sharded" in meta["base_service_name"] or "top_clients" in key:
                     environment["WORKER_ID"] = str(index - 1)  # 0-based for sharded workers
                 else:
                     environment["WORKER_ID"] = str(index)  # 1-based for regular workers
