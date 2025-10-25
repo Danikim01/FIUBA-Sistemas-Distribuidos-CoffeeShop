@@ -1,9 +1,12 @@
 """Worker configuration management."""
 
+import logging
 import os
 from typing import Optional, Union
 
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue
+
+logger = logging.getLogger(__name__)
 
 class MiddlewareConfig:
     """Configuration class for worker settings."""
@@ -85,6 +88,7 @@ class MiddlewareConfig:
         name = self.input_queue + '_eof_requeue'
         if self.is_sharded_worker:
             name = self.input_exchange + '_eof_requeue_sharded'
+        logger.info(f"[DEBUG] Worker {os.getenv('WORKER_ID', '0')} creating EOF requeue queue: {name}")
         return self.create_queue(name, 1)
 
     def get_input_target(self) -> str:

@@ -50,9 +50,10 @@ class AggregatorWorker(BaseWorker):
             logger.info(f"[AGGREGATOR WORKER] Sending with type metadata: {type_metadata}")
         self.send_message(client_id=client_id, data=payload, type_metadata=type_metadata)
         logger.info(
-            "%s emitted %s result(s) for client {client_id}\n%s",
+            "%s emitted %s result(s) for client %s",
             self.__class__.__name__,
-            get_payload_len(payload)
+            get_payload_len(payload),
+            client_id
         )
 
     
