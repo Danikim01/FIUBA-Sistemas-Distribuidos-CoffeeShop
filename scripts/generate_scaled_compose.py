@@ -66,6 +66,22 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": True,
     },
+    "tpv_sharding_router": {
+        "display_name": "TPV Sharding Router",
+        "base_service_name": "tpv-sharding-router",
+        "command": ["python", "sharding/tpv_sharding_router.py"],
+        "needs_worker_id": False,
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_EXCHANGE", "NUM_SHARDS"],
+        "scalable": False,
+    },
+    "tpv_sharded": {
+        "display_name": "TPV Sharded Workers",
+        "base_service_name": "tpv-worker-sharded",
+        "command": ["python", "local_top_scaling/tpv_sharded.py"],
+        "needs_worker_id": True,
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE", "NUM_SHARDS"],
+        "scalable": True,
+    },
     "tpv_aggregator": {
         "display_name": "TPV Aggregator",
         "base_service_name": "tpv-aggregator",
@@ -391,6 +407,11 @@ def generate_worker_sections(
             continue
 
         meta = WORKER_DEFINITIONS[key]
+        
+        # Skip old workers if sharded versions exist
+        if key == "tpv" and "tpv_sharded" in workers:
+            continue
+        # Note: top_clients is already the sharded version, so we don't skip it
         total_count = worker_cfg.count
         plural = "instancias" if total_count != 1 else "instancia"
         sections.append(f"  # {meta['display_name']} ({total_count} {plural})")
@@ -421,8 +442,10 @@ def generate_worker_sections(
                 environment.setdefault("BATCH_TIMEOUT", "1.0")
                 environment["REPLICA_COUNT"] = "1"  # Sharding router is always single instance
             
-            # Special handling for sharded workers - fix queue names
+            # Special handling for sharded workers - fix queue names and add sharded flag
             if "sharded" in meta["base_service_name"]:
+                # Add IS_SHARDED_WORKER flag for sharded workers
+                environment["IS_SHARDED_WORKER"] = "True"
                 # Fix the INPUT_QUEUE to include the shard number
                 if "INPUT_QUEUE" in environment:
                     base_queue = environment["INPUT_QUEUE"]

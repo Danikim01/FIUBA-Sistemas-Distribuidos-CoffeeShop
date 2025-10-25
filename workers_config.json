@@ -64,6 +64,24 @@
         "OUTPUT_QUEUE": "tpv_partial"
       }
     },
+    "tpv_sharding_router": {
+      "count": 1,
+      "environment": {
+        "INPUT_EXCHANGE": "transactions_time_filtered",
+        "INPUT_QUEUE": "transactions_time_filtered_tpv_sharding_router",
+        "OUTPUT_EXCHANGE": "transactions_time_filtered_tpv_sharded",
+        "NUM_SHARDS": "2"
+      }
+    },
+    "tpv_sharded": {
+      "count": 2,
+      "environment": {
+        "INPUT_EXCHANGE": "transactions_time_filtered_tpv_sharded",
+        "INPUT_QUEUE": "transactions_time_filtered_tpv_shard",
+        "OUTPUT_QUEUE": "tpv_partial",
+        "NUM_SHARDS": "2"
+      }
+    },
     "items_top": {
       "count": 2,
       "environment": {
