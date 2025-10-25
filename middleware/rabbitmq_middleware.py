@@ -14,7 +14,7 @@ from typing import Any, Callable, List, Optional, Tuple
 import pika  # type: ignore
 import pika.exceptions  # type: ignore
 
-from .connection_manager import RobustRabbitMQConnection, ConnectionPool
+from .connection_manager import RobustRabbitMQConnection
 from .middleware_interface import (
     MessageMiddleware,
     MessageMiddlewareCloseError,
@@ -62,12 +62,6 @@ class _BaseRabbitMQMiddleware(MessageMiddleware):
         self.prefetch_count = prefetch_count
         self.consuming = False
 
-        # Use connection pool for better resource management
-        self._connection_pool = ConnectionPool(
-            host=host,
-            port=port,
-            max_connections=5  # Reasonable pool size
-        )
         self._connection_manager = RobustRabbitMQConnection(
             host=host,
             port=port,
@@ -290,32 +284,11 @@ class RabbitMQMiddlewareQueue(_BaseRabbitMQMiddleware):
         payload = serialize_message(message).encode("utf-8")
         attempt = 0
 
-        # Try to use existing channel first
-        with self._lock:
-            if self._active_channel and self._active_channel.is_open:
-                try:
-                    self._active_channel.basic_publish(
-                        exchange=exchange if exchange else "",
-                        routing_key=self.queue_name if not routing_key else routing_key,
-                        body=payload,
-                    )
-                    return
-                except (pika.exceptions.ChannelClosed, pika.exceptions.AMQPConnectionError):
-                    # Channel is closed, clear it and continue with new channel
-                    self._clear_active_channel()
-
         while True:
             channel: Optional[pika.channel.Channel] = None
 
             try:
-                # Try to get connection from pool first
-                try:
-                    connection_manager = self._connection_pool.get_connection()
-                    connection = connection_manager.get_connection()
-                except Exception:
-                    # Fallback to direct connection
-                    connection = self._connection_manager.get_connection()
-                
+                connection = self._connection_manager.get_connection()
                 channel = connection.channel()
                 self._declare_queue(channel)
 
@@ -327,11 +300,6 @@ class RabbitMQMiddlewareQueue(_BaseRabbitMQMiddleware):
                     routing_key=self.queue_name if not routing_key else routing_key,
                     body=payload,
                 )
-                
-                # Return connection to pool for reuse
-                if hasattr(self, '_connection_pool'):
-                    self._connection_pool.return_connection(connection_manager)
-                
                 return
 
             except pika.exceptions.UnroutableError as exc:

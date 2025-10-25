@@ -27,6 +27,8 @@ class MiddlewareConfig:
 
         self.prefetch_count = int(os.getenv('PREFETCH_COUNT', '10'))
 
+        self.is_sharded_worker = self._is_sharded_worker()
+
         self.input_middleware = self._create_input_middleware()
         self.output_middleware = self._create_output_middleware()
 
@@ -81,6 +83,8 @@ class MiddlewareConfig:
     
     def create_eof_requeue(self) -> RabbitMQMiddlewareQueue:
         name = self.input_queue + '_eof_requeue'
+        if self.is_sharded_worker:
+            name = self.input_exchange + '_eof_requeue_sharded'
         return self.create_queue(name, 1)
 
     def get_input_target(self) -> str:
@@ -101,7 +105,7 @@ class MiddlewareConfig:
     
     def _is_sharded_worker(self) -> bool:
         """Check if this is a sharded worker that needs specific routing keys."""
-        return os.getenv('NUM_SHARDS') is not None and os.getenv('WORKER_ID') is not None
+        return os.getenv('IS_SHARDED_WORKER') == 'True'
 
     def cleanup(self) -> None:
         """Clean up middleware connections."""

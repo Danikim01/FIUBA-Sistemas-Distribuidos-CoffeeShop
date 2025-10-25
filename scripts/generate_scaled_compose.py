@@ -418,6 +418,9 @@ def generate_worker_sections(
                     environment["WORKER_ID"] = str(index - 1)  # 0-based for sharded workers
                 else:
                     environment["WORKER_ID"] = str(index)  # 1-based for regular workers
+            elif "sharding_router" in key:
+                # Sharding routers should use 0-based indexing to match sharded workers
+                environment["WORKER_ID"] = str(index - 1)  # 0-based for sharding routers
 
             if environment:
                 lines.append("    environment:")

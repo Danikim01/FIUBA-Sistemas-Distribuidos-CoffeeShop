@@ -5,7 +5,6 @@ from __future__ import annotations
 import threading
 from contextlib import suppress
 from typing import Callable, Set
-import logging
 
 from .rabbitmq_middleware import (
     MessageMiddlewareDisconnectedError,
@@ -15,8 +14,6 @@ from .rabbitmq_middleware import (
 
 QueueFactory = Callable[[], RabbitMQMiddlewareQueue]
 ExchangeFactory = Callable[[], RabbitMQMiddlewareExchange]
-
-logger = logging.getLogger(__name__)
 class ThreadAwareQueuePublisher:
     """Provide a thread-local view over a queue publisher.
 
@@ -39,35 +36,8 @@ class ThreadAwareQueuePublisher:
             queue.send(message)
         except MessageMiddlewareDisconnectedError:
             # Connection dropped; recreate and retry once.
-            logger.warning("Connection dropped, recreating queue instance")
             self._reset_instance(queue)
             self._get_instance().send(message)
-        except Exception as exc:
-            logger.error(f"Unexpected error sending message: {exc}")
-            # Reset instance on any error to ensure clean state
-            self._reset_instance(queue)
-            raise
-
-    def send_batch(self, messages: list) -> None:
-        """Send multiple messages efficiently using the same connection."""
-        if not messages:
-            return
-            
-        queue = self._get_instance()
-        try:
-            for message in messages:
-                queue.send(message)
-        except MessageMiddlewareDisconnectedError:
-            logger.warning("Connection dropped during batch send, recreating queue instance")
-            self._reset_instance(queue)
-            # Retry with new instance
-            queue = self._get_instance()
-            for message in messages:
-                queue.send(message)
-        except Exception as exc:
-            logger.error(f"Unexpected error in batch send: {exc}")
-            self._reset_instance(queue)
-            raise
 
     def close_all(self) -> None:
         """Close every underlying queue instance."""

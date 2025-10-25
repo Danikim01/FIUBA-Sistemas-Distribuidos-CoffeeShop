@@ -48,7 +48,7 @@ class ShardedClientsWorker(AggregatorWorker):
     def should_process_transaction(self, payload: Dict[str, Any]) -> bool:
         """
         Determine if this worker should process the transaction based on store_id sharding.
-        Since we're using routing keys, RabbitMQ already filtered the messages for us.
+        Also handles coordinated EOF messages that don't have store_id.
         
         Args:
             payload: Transaction data
@@ -56,19 +56,12 @@ class ShardedClientsWorker(AggregatorWorker):
         Returns:
             True if this worker should process the transaction
         """
-        # Check if this is a control message (EOF, heartbeat, etc.)
-        # if self._is_control_message(payload):
-        #     logger.debug(f"Received control message: {payload}")
-        #     return False
-            
-        # With routing keys, RabbitMQ already filtered messages for this worker's shard
-        # We just need to verify the store_id exists
         store_id = extract_store_id_from_payload(payload)
         if store_id is None:
             logger.warning(f"Transaction without store_id, skipping. Payload keys: {list(payload.keys()) if isinstance(payload, dict) else 'Not a dict'}")
             return False
             
-        # Double-check that this transaction belongs to our shard (for debugging)
+        # For regular transactions, verify they belong to our shard
         expected_routing_key = get_routing_key(store_id, self.num_shards)
         if expected_routing_key != self.expected_routing_key:
             logger.warning(f"Received transaction for wrong shard: store_id={store_id}, expected={self.expected_routing_key}, got={expected_routing_key}")

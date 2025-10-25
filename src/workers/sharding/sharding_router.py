@@ -194,19 +194,10 @@ class ShardingRouter(BaseWorker):
             routing_key = f"shard_{shard_id}"
             eof_messages.append((client_id, routing_key))
         
-        # Send all EOFs in a single batch operation
-        try:
-            for client_id_eof, routing_key in eof_messages:
-                self.eof_handler.output_eof_with_routing_key(client_id_eof, routing_key, exchange=self.middleware_config.output_exchange)
-        except Exception as exc:
-            logger.error(f"Error propagating EOFs for client {client_id}: {exc}")
-            # Continue with individual EOFs as fallback
-            for shard_id in range(self.num_shards):
-                routing_key = f"shard_{shard_id}"
-                try:
-                    self.eof_handler.output_eof_with_routing_key(client_id, routing_key, exchange=self.middleware_config.output_exchange)
-                except Exception as e:
-                    logger.error(f"Failed to send EOF to shard {routing_key}: {e}")
+        for client_id_eof, routing_key in eof_messages:
+            self.eof_handler.handle_eof_with_routing_key(client_id=client_id_eof, message=message, routing_key=routing_key, exchange=self.middleware_config.output_exchange)
+            break
+
         
     
     def cleanup(self) -> None:
@@ -227,32 +218,6 @@ class ShardingRouter(BaseWorker):
         
         # Call parent cleanup
         super().cleanup()
-
-    # def _is_control_message(self, message: dict) -> bool:
-    #     """
-    #     Check if this is a control message (EOF, heartbeat, etc.).
-        
-    #     Args:
-    #         message: Message payload
-            
-    #     Returns:
-    #         True if this is a control message
-    #     """         
-    #     # Check for common control message patterns
-    #     control_indicators = [
-    #         'EOF', 'eof', 'END'
-    #     ]
-        
-    #     # If message has very few keys and no store_id, it's likely a control message
-    #     if len(message) <= 2 and 'store_id' not in message:
-    #         return True
-            
-    #     # Check if any key suggests this is a control message
-    #     for key in message.keys():
-    #         if any(indicator in str(key).lower() for indicator in control_indicators):
-    #             return True
-                
-    #     return False
 
 if __name__ == '__main__':
     run_main(ShardingRouter)
