@@ -78,8 +78,8 @@ class StateManager(Generic[T]):
         # If state_data was provided but we loaded from disk, update the reference
         if state_data is not None and self.state_data is not state_data:
             # Update the original reference to point to our managed state
-            state_data.clear()
-            state_data.update(self.state_data)
+            state_data.clear() # pyright: ignore[reportAttributeAccessIssue]
+            state_data.update(self.state_data) # pyright: ignore[reportAttributeAccessIssue]
     
     def _ensure_state_dir(self) -> None:
         """Ensure the state directory exists."""
@@ -212,7 +212,7 @@ class StateManager(Generic[T]):
         # Default implementation - subclasses should override this
         pass
     
-    def get_state_data(self) -> T:
+    def get_state_data(self) -> T | None:
         """Get the current state data."""
         return self.state_data
     

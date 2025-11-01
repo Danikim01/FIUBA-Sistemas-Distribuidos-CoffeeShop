@@ -5,9 +5,9 @@ import signal
 import threading
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List
-from handle_eof import EOFHandler
-from middleware_config import MiddlewareConfig
-from message_utils import (
+from handle_eof import EOFHandler # pyright: ignore[reportMissingImports]
+from middleware_config import MiddlewareConfig # pyright: ignore[reportMissingImports]
+from message_utils import ( # pyright: ignore[reportMissingImports]
     ClientId,
     extract_data_and_client_id,
     is_eof_message,
@@ -61,7 +61,7 @@ class BaseWorker(ABC):
         # Clean up resources
         self.cleanup()
     
-    def send_message(self, client_id: ClientId, data: Any, routing_key: str = None ,  **metadata):
+    def send_message(self, client_id: ClientId, data: Any, routing_key: str | None = None ,  **metadata):
         """Send a message to the output with client metadata.
         
         Args:

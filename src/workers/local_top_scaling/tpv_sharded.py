@@ -6,10 +6,9 @@ import logging
 import os
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, DefaultDict, Dict
-
-from message_utils import ClientId
-from worker_utils import run_main, safe_float_conversion, safe_int_conversion, extract_year_half
+from typing import Any, Dict
+from message_utils import ClientId # pyright: ignore[reportMissingImports]
+from worker_utils import run_main, safe_float_conversion, safe_int_conversion, extract_year_half # pyright: ignore[reportMissingImports]
 from workers.local_top_scaling.aggregator_worker import AggregatorWorker
 from workers.utils.sharding_utils import get_routing_key, extract_store_id_from_payload
 from workers.utils.state_manager import TPVStateManager
@@ -63,7 +62,7 @@ class ShardedTPVWorker(AggregatorWorker):
         )
         
         # Get reference to the state data managed by StateManager
-        self.partial_tpv = self.state_manager.get_state_data()
+        self.partial_tpv = self.state_manager.get_state_data() or {}
         
         # Sync state after potential load from disk
         self.state_manager.sync_state_after_load()
@@ -167,17 +166,15 @@ class ShardedTPVWorker(AggregatorWorker):
         return results
 
     def handle_eof(self, message: Dict[str, Any], client_id: ClientId):
-        message_uuid = self._get_current_message_uuid()
-        with self._state_lock:
-            previous_state = self.state_manager.clone_client_state(client_id)
-            previous_uuid = self.state_manager.get_last_processed_message(client_id)
-
         try:
             super().handle_eof(message, client_id)
         except Exception:
             raise
 
         with self._state_lock:
+            previous_state = self.state_manager.clone_client_state(client_id)
+            previous_uuid = self.state_manager.get_last_processed_message(client_id)
+            message_uuid = self._get_current_message_uuid()
             try:
                 if message_uuid:
                     self.state_manager.set_last_processed_message(client_id, message_uuid)

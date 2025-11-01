@@ -5,6 +5,8 @@ from typing import Any, Dict, Iterable, List, Tuple
 import numpy as np
 import pandas as pd
 
+from data_processor import get_reduced
+
 logger = logging.getLogger(__name__)
 
 ResultOutcome = Tuple[bool, str]
@@ -21,6 +23,7 @@ class ResultsValidator:
     }
 
     def __init__(self, data_dir: str | Path | None) -> None:
+        self.reduced = get_reduced()
         self.enabled = False
         self._summary: Dict[str, ResultOutcome] = {}
         self._row_cache: Dict[str, List[Dict[str, Any]]] = {}
@@ -92,7 +95,10 @@ class ResultsValidator:
         directory = self._data_dir / folder
         frames: List[pd.DataFrame] = []
         if directory.exists():
-            for csv_file in sorted(directory.glob("*.csv")):
+            csv_files = sorted(directory.glob("*.csv"))
+            if self.reduced and folder in {"transactions", "transaction_items"}:
+                csv_files = [path for path in csv_files if path.name.endswith("01.csv")]
+            for csv_file in csv_files:
                 frame = pd.read_csv(csv_file, parse_dates=parse_dates)
                 frames.append(frame)
 
