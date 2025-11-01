@@ -1,11 +1,7 @@
-#!/usrfrom utils.worker_config import WorkerConfig
-from utils.worker_utils import run_main, safe_float_conversion
-from filter_worker import FilterWorker
-
 import os
 import logging
+from filter_worker import FilterWorker
 from typing import Any
-
 from worker_utils import run_main, safe_float_conversion
 from workers.filter.filter_worker import FilterWorker
 
