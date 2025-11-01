@@ -2,6 +2,8 @@
 
 ### From root directory:
 
+- Note: add flag `--skip-image-pull` if the dind image is already installed, if not then remove flag and the script will automatically install it.
+
 * Example run without failures (adjusts flags as needed)
 
 ```python
