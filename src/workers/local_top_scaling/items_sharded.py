@@ -7,8 +7,8 @@ import os
 from collections import defaultdict
 from typing import Any, DefaultDict, Dict, List
 
-from message_utils import ClientId
-from worker_utils import run_main, safe_float_conversion, safe_int_conversion, extract_year_month
+from message_utils import ClientId # pyright: ignore[reportMissingImports]
+from worker_utils import run_main, safe_float_conversion, safe_int_conversion, extract_year_month # pyright: ignore[reportMissingImports]
 from workers.local_top_scaling.aggregator_worker import AggregatorWorker
 from workers.utils.sharding_utils import get_routing_key_for_semester, extract_semester_from_payload
 
@@ -77,9 +77,13 @@ class ShardedItemsWorker(AggregatorWorker):
             # This is likely a control message (EOF, etc.) - process it
             logger.debug(f"Received control message (no created_at): {payload}")
             return False
-            
+        
         # For regular transaction items, verify they belong to our shard
-        expected_routing_key = get_routing_key_for_semester(payload.get('created_at'), self.num_shards)
+        created_at = payload.get('created_at')
+        if created_at is None:
+            logger.debug("created_at is None, skipping transaction.")
+            return False
+        expected_routing_key = get_routing_key_for_semester(created_at, self.num_shards)
         if expected_routing_key != self.expected_routing_key:
             logger.warning(f"Received transaction item for wrong shard: semester={semester}, expected={self.expected_routing_key}, got={expected_routing_key}")
             return False
