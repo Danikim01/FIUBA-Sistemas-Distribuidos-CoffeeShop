@@ -7,8 +7,8 @@ import os
 from collections import defaultdict
 from typing import Any, DefaultDict, Dict, List, Mapping
 
-from message_utils import ClientId
-from worker_utils import run_main, safe_int_conversion, top_items_sort_key
+from message_utils import ClientId # pyright: ignore[reportMissingImports]
+from worker_utils import run_main, safe_int_conversion, top_items_sort_key # pyright: ignore[reportMissingImports]
 from workers.extra_source.menu_items import MenuItemsExtraSource
 from workers.local_top_scaling.aggregator_worker import AggregatorWorker
 
@@ -58,8 +58,11 @@ class FinalItemsAggregator(AggregatorWorker):
         )
 
     def reset_state(self, client_id: ClientId) -> None:
-        self._quantity_totals[client_id] = _new_quantity_totals()
-        self._profit_totals[client_id] = _new_profit_totals()
+        for store in (self._quantity_totals, self._profit_totals):
+            try:
+                del store[client_id]
+            except KeyError:
+                continue
         self.menu_items_source.reset_state(client_id)
 
     def _merge_quantity_totals_map(self, client_id: ClientId, totals: Any) -> None:

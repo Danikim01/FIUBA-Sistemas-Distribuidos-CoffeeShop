@@ -7,8 +7,8 @@ from asyncio.log import logger
 import threading
 from typing import Any, Dict, TypeVar
 
-from message_utils import ClientId
-from worker_utils import get_payload_len
+from message_utils import ClientId # pyright: ignore[reportMissingImports]
+from worker_utils import get_payload_len # pyright: ignore[reportMissingImports]
 from workers.base_worker import BaseWorker
 
 StateDict = Dict[str, Any]
@@ -60,19 +60,20 @@ class AggregatorWorker(BaseWorker):
     def handle_eof(self, message: Dict[str, Any], client_id: ClientId):
         logger.info(f"[AGGREGATOR WORKER] Handling EOF for client {client_id}")
         payload_batches: list[list[Dict[str, Any]]] = []
-        with self._state_lock:
-            payload = self.create_payload(client_id)
-            if payload:
-                self.reset_state(client_id)
-                if self.chunk_payload:
-                    payload_batches = [payload]
-                else:
-                    payload_batches = self._chunk_payload(payload, self.chunk_size)
+        with self._pause_message_processing():
+            with self._state_lock:
+                payload = self.create_payload(client_id)
+                if payload:
+                    self.reset_state(client_id)
+                    if self.chunk_payload:
+                        payload_batches = [payload]
+                    else:
+                        payload_batches = self._chunk_payload(payload, self.chunk_size)
 
-        for chunk in payload_batches:
-            self.send_payload(chunk, client_id)
+            for chunk in payload_batches:
+                self.send_payload(chunk, client_id)
 
-        super().handle_eof(message, client_id)
+            super().handle_eof(message, client_id)
 
     def process_message(self, message: dict, client_id: ClientId):
         with self._state_lock:

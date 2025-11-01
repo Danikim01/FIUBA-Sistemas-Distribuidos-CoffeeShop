@@ -5,6 +5,7 @@ import signal
 import threading
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List
+from contextlib import contextmanager
 from handle_eof import EOFHandler # pyright: ignore[reportMissingImports]
 from middleware_config import MiddlewareConfig # pyright: ignore[reportMissingImports]
 from message_utils import ( # pyright: ignore[reportMissingImports]
@@ -33,6 +34,10 @@ class BaseWorker(ABC):
         self.middleware_config = MiddlewareConfig()
         self.eof_handler = EOFHandler(self.middleware_config)
         self._current_message_metadata: Dict[str, Any] | None = None
+        self._inflight_condition = threading.Condition()
+        self._inflight_messages = 0
+        self._pause_requests = 0
+        self._pause_consumption = False
 
         logger.info(
             "%s initialized - Input: %s, Output: %s",
@@ -97,7 +102,8 @@ class BaseWorker(ABC):
 
     # overwritten by top worker
     def handle_eof(self, message: Dict[str, Any], client_id: ClientId):
-        self.eof_handler.handle_eof(message, client_id)
+        with self._pause_message_processing():
+            self.eof_handler.handle_eof(message, client_id)
 
     def start_consuming(self):
         """Start consuming messages from the input queue."""
@@ -119,12 +125,15 @@ class BaseWorker(ABC):
                     if is_eof_message(message):
                         return self.handle_eof(message, client_id)
 
-                    logger.debug(f"Processing message for client {client_id}")
-                    
-                    if isinstance(actual_data, list):
-                        self.process_batch(actual_data, client_id)
-                    else:
-                        self.process_message(actual_data, client_id)
+                    self._increment_inflight()
+                    try:
+                        logger.debug(f"Processing message for client {client_id}")
+                        if isinstance(actual_data, list):
+                            self.process_batch(actual_data, client_id)
+                        else:
+                            self.process_message(actual_data, client_id)
+                    finally:
+                        self._decrement_inflight()
 
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
@@ -153,3 +162,39 @@ class BaseWorker(ABC):
     def _get_current_message_metadata(self) -> Dict[str, Any] | None:
         """Return the metadata of the message currently being processed."""
         return self._current_message_metadata
+
+    def _increment_inflight(self) -> None:
+        with self._inflight_condition:
+            while self._pause_consumption:
+                self._inflight_condition.wait()
+            self._inflight_messages += 1
+
+    def _decrement_inflight(self) -> None:
+        with self._inflight_condition:
+            if self._inflight_messages > 0:
+                self._inflight_messages -= 1
+            if self._inflight_messages == 0:
+                self._inflight_condition.notify_all()
+
+    def _begin_pause(self) -> None:
+        with self._inflight_condition:
+            self._pause_requests += 1
+            self._pause_consumption = True
+            while self._inflight_messages > 0:
+                self._inflight_condition.wait()
+
+    def _end_pause(self) -> None:
+        with self._inflight_condition:
+            if self._pause_requests > 0:
+                self._pause_requests -= 1
+            if self._pause_requests == 0:
+                self._pause_consumption = False
+                self._inflight_condition.notify_all()
+
+    @contextmanager
+    def _pause_message_processing(self):
+        self._begin_pause()
+        try:
+            yield
+        finally:
+            self._end_pause()

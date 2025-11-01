@@ -68,7 +68,10 @@ class ShardedTPVWorker(AggregatorWorker):
         self.state_manager.sync_state_after_load()
 
     def reset_state(self, client_id: ClientId) -> None:
-        self.partial_tpv[client_id] = defaultdict(lambda: defaultdict(float))
+        try:
+            del self.partial_tpv[client_id]
+        except KeyError:
+            pass
 
     def should_process_transaction(self, payload: Dict[str, Any]) -> bool:
         """
@@ -150,7 +153,7 @@ class ShardedTPVWorker(AggregatorWorker):
                 raise
 
     def create_payload(self, client_id: str) -> list[Dict[str, Any]]:
-        totals = self.partial_tpv.get(client_id, {})
+        totals = self.partial_tpv.pop(client_id, {})
         results: list[Dict[str, Any]] = []
 
         for year_half, stores in totals.items():
@@ -166,34 +169,35 @@ class ShardedTPVWorker(AggregatorWorker):
         return results
 
     def handle_eof(self, message: Dict[str, Any], client_id: ClientId):
-        try:
-            super().handle_eof(message, client_id)
-        except Exception:
-            raise
-
-        with self._state_lock:
-            previous_state = self.state_manager.clone_client_state(client_id)
-            previous_uuid = self.state_manager.get_last_processed_message(client_id)
-            message_uuid = self._get_current_message_uuid()
+        with self._pause_message_processing():
             try:
-                if message_uuid:
-                    self.state_manager.set_last_processed_message(client_id, message_uuid)
-                else:
-                    logger.warning(f"EOF message for client {client_id} has no UUID; clearing last processed message")
-                    self.state_manager.clear_last_processed_message(client_id)
-
-                self.state_manager.drop_empty_client_state(client_id)
-                self.state_manager.persist_state()
+                super().handle_eof(message, client_id)
             except Exception:
-                self.state_manager.restore_client_state(client_id, previous_state)
-                if message_uuid:
-                    if previous_uuid is None:
-                        self.state_manager.clear_last_processed_message(client_id)
-                    else:
-                        self.state_manager.set_last_processed_message(client_id, previous_uuid)
-                elif previous_uuid is not None:
-                    self.state_manager.set_last_processed_message(client_id, previous_uuid)
                 raise
+
+            with self._state_lock:
+                previous_state = self.state_manager.clone_client_state(client_id)
+                previous_uuid = self.state_manager.get_last_processed_message(client_id)
+                message_uuid = self._get_current_message_uuid()
+                try:
+                    if message_uuid:
+                        self.state_manager.set_last_processed_message(client_id, message_uuid)
+                    else:
+                        logger.warning(f"EOF message for client {client_id} has no UUID; clearing last processed message")
+                        self.state_manager.clear_last_processed_message(client_id)
+
+                    self.state_manager.drop_empty_client_state(client_id)
+                    self.state_manager.persist_state()
+                except Exception:
+                    self.state_manager.restore_client_state(client_id, previous_state)
+                    if message_uuid:
+                        if previous_uuid is None:
+                            self.state_manager.clear_last_processed_message(client_id)
+                        else:
+                            self.state_manager.set_last_processed_message(client_id, previous_uuid)
+                    elif previous_uuid is not None:
+                        self.state_manager.set_last_processed_message(client_id, previous_uuid)
+                    raise
 
     def _get_current_message_uuid(self) -> str | None:
         metadata = self._get_current_message_metadata()

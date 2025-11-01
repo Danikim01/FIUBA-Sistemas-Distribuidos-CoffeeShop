@@ -6,8 +6,8 @@ import logging
 import os
 from collections import defaultdict
 from typing import Any, DefaultDict, Dict, List
-from message_utils import ClientId
-from worker_utils import run_main, safe_int_conversion
+from message_utils import ClientId # pyright: ignore[reportMissingImports]
+from worker_utils import run_main, safe_int_conversion # pyright: ignore[reportMissingImports]
 from workers.local_top_scaling.aggregator_worker import AggregatorWorker
 from workers.extra_source.users import UsersExtraSource
 from workers.extra_source.stores import StoresExtraSource
@@ -34,7 +34,10 @@ class TopClientsBirthdaysAggregator(AggregatorWorker):
         self.recieved_payloads: Dict[ClientId, list[dict[str, Any]]] = {}
 
     def reset_state(self, client_id: ClientId) -> None:
-        self.recieved_payloads[client_id] = []
+        try:
+            del self.recieved_payloads[client_id]
+        except KeyError:
+            pass
         self.stores_source.reset_state(client_id)
         self.birthdays_source.reset_state(client_id)
     

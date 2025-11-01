@@ -1,11 +1,11 @@
 from collections import defaultdict
 import logging
 from typing import Any, DefaultDict, Dict, List
-from message_utils import ClientId
+from message_utils import ClientId # pyright: ignore[reportMissingImports]
 from workers.local_top_scaling.aggregator_worker import AggregatorWorker
 from workers.local_top_scaling.tpv_sharded import StoreId, YearHalf
 from workers.extra_source.stores import StoresExtraSource
-from worker_utils import normalize_tpv_entry, safe_int_conversion, tpv_sort_key, run_main
+from worker_utils import normalize_tpv_entry, safe_int_conversion, tpv_sort_key, run_main # pyright: ignore[reportMissingImports]
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,7 +25,10 @@ class TPVAggregator(AggregatorWorker):
         ] = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
 
     def reset_state(self, client_id: ClientId) -> None:
-        self.recieved_payloads[client_id] = defaultdict(lambda: defaultdict(float))
+        try:
+            del self.recieved_payloads[client_id]
+        except KeyError:
+            pass
         self.stores_source.reset_state(client_id)
 
     def accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
@@ -42,7 +45,7 @@ class TPVAggregator(AggregatorWorker):
 
     def create_payload(self, client_id: ClientId) -> List[Dict[str, Any]]:
         # Inject store names into the payload
-        client_payloads = self.recieved_payloads.get(client_id, {})
+        client_payloads = self.recieved_payloads.pop(client_id, {})
         results: List[Dict[str, Any]] = []
 
         for year_half, stores in client_payloads.items():

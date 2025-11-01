@@ -184,30 +184,36 @@ class ShardingRouter(BaseWorker):
         """
         logger.info(f"Received EOF for client {client_id}, flushing all remaining batches")
         
-        # First, flush all remaining batches for this client
-        with self.batch_lock:
-            if client_id in self.batches:
-                for routing_key in list(self.batches[client_id].keys()):
-                    self._flush_batch(client_id, routing_key)
-                
-                # Clean up client data
+        with self._pause_message_processing():
+            # First, flush all remaining batches for this client
+            with self.batch_lock:
                 if client_id in self.batches:
-                    del self.batches[client_id]
-                if client_id in self.batch_timers:
-                    del self.batch_timers[client_id]
+                    for routing_key in list(self.batches[client_id].keys()):
+                        self._flush_batch(client_id, routing_key)
+                    
+                    # Clean up client data
+                    if client_id in self.batches:
+                        del self.batches[client_id]
+                    if client_id in self.batch_timers:
+                        del self.batch_timers[client_id]
 
-        # Send EOF to each shard specifically with routing keys
-        logger.info(f"Propagating EOF to all {self.num_shards} shards for client {client_id}")
-        
-        # Batch all EOF messages to reduce channel creation overhead
-        eof_messages = []
-        for shard_id in range(self.num_shards):
-            routing_key = f"shard_{shard_id}"
-            eof_messages.append((client_id, routing_key))
-        
-        for client_id_eof, routing_key in eof_messages:
-            self.eof_handler.handle_eof_with_routing_key(client_id=client_id_eof, message=message, routing_key=routing_key, exchange=self.middleware_config.output_exchange)
-            break
+            # Send EOF to each shard specifically with routing keys
+            logger.info(f"Propagating EOF to all {self.num_shards} shards for client {client_id}")
+            
+            # Batch all EOF messages to reduce channel creation overhead
+            eof_messages = []
+            for shard_id in range(self.num_shards):
+                routing_key = f"shard_{shard_id}"
+                eof_messages.append((client_id, routing_key))
+            
+            for client_id_eof, routing_key in eof_messages:
+                self.eof_handler.handle_eof_with_routing_key(
+                    client_id=client_id_eof,
+                    message=message,
+                    routing_key=routing_key,
+                    exchange=self.middleware_config.output_exchange,
+                )
+                break
 
         
     
