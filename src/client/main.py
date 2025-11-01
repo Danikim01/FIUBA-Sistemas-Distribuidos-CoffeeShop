@@ -65,7 +65,7 @@ class CoffeeShopClient:
                 return False
             
             session_count = 0
-            max_sessions = int(os.getenv('MAX_SESSIONS', '1'))  # Default to 1 session
+            max_sessions = int(os.getenv('SESSIONS', '1'))  # Default to 1 session
 
             logger.info(f"Starting continuous mode with {max_sessions} sessions")
             

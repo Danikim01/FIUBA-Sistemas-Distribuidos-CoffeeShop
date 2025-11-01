@@ -63,7 +63,7 @@ services:
       - LOG_LEVEL=INFO
       - DATA_DIR=.data
       - REDUCED=True
-      - MAX_SESSIONS=1
+      - SESSIONS=1
     volumes:
       - ./src/client/.data:/app/.data:ro
       - ./results:/app/.results
@@ -86,7 +86,7 @@ services:
       - LOG_LEVEL=INFO
       - DATA_DIR=.data
       - REDUCED=True
-      - MAX_SESSIONS=1
+      - SESSIONS=1
     volumes:
       - ./src/client/.data:/app/.data:ro
       - ./results:/app/.results
@@ -522,4 +522,3 @@ networks:
 
 volumes:
   rabbitmq_data:
-
