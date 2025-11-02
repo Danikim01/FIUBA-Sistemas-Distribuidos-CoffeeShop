@@ -1,7 +1,9 @@
 """Base worker class providing common functionality for all workers."""
 
 import logging
+import os
 import signal
+import sys
 import threading
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List
@@ -14,6 +16,8 @@ from message_utils import ( # pyright: ignore[reportMissingImports]
     is_eof_message,
     create_message_with_metadata,
 )
+
+from healthcheck.service import HealthcheckService
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +42,15 @@ class BaseWorker(ABC):
         self._inflight_messages = 0
         self._pause_requests = 0
         self._pause_consumption = False
+
+        # Initialize healthcheck service
+        self.healthcheck_service = None
+        try:
+            self.healthcheck_service = HealthcheckService()
+            self.healthcheck_service.start()
+            logger.info("Worker %s started healthcheck service", self.__class__.__name__)
+        except Exception as e:
+            logger.error(f"Failed to start healthcheck service: {e}")
 
         logger.info(
             "%s initialized - Input: %s, Output: %s",
@@ -153,6 +166,13 @@ class BaseWorker(ABC):
     def cleanup(self):
         """Clean up resources."""
         try:
+            # Stop healthcheck service
+            if self.healthcheck_service:
+                try:
+                    self.healthcheck_service.stop()
+                except Exception as e:
+                    logger.warning(f"Error stopping healthcheck service: {e}")
+            
             self.eof_handler.cleanup()
             self.middleware_config.cleanup()
             logger.info("Resources cleaned up")

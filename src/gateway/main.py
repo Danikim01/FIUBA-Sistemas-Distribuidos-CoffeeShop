@@ -1,3 +1,4 @@
+import os
 import socket
 import logging
 import threading
@@ -8,6 +9,10 @@ import sys
 from config import GatewayConfig
 from queue_manager import QueueManager
 from client_handler import ClientHandler
+
+
+from healthcheck.service import HealthcheckService
+
 
 # Configure logging
 logging.basicConfig(
@@ -31,6 +36,15 @@ class CoffeeShopGateway:
         self.socket = None
         self.running = False
         self.shutdown_event = threading.Event()
+        
+        # Initialize healthcheck service
+        self.healthcheck_service = None
+        try:
+            self.healthcheck_service = HealthcheckService()
+            self.healthcheck_service.start()
+            logger.info("Gateway started healthcheck service")
+        except Exception as e:
+            logger.error(f"Failed to start healthcheck service: {e}")
         
         # Configure signal handling
         signal.signal(signal.SIGTERM, self._handle_sigterm)
@@ -85,6 +99,14 @@ class CoffeeShopGateway:
         """Stop the gateway server"""
         self.running = False
         self.shutdown_event.set()
+        
+        # Stop healthcheck service
+        if self.healthcheck_service:
+            try:
+                self.healthcheck_service.stop()
+            except Exception as e:
+                logger.warning(f"Error stopping healthcheck service: {e}")
+        
         try:
             self.queue_manager.close()
         except Exception as exc:  # noqa: BLE001

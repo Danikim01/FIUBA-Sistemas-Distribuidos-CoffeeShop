@@ -15,6 +15,9 @@ COPY middleware /app/middleware
 # Copy workers source code preserving the package layout
 COPY src/workers /app/src/workers
 
+# copy healthcheck source code
+COPY src/healthcheck /app/src/healthcheck
+
 # Ensure all modules are importable
 ENV PYTHONPATH=/app:/app/src:/app/src/workers:/app/src/workers/utils
 
