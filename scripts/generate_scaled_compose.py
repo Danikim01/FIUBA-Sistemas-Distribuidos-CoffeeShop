@@ -5,10 +5,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, TypedDict
 
+# Add src directory to path to import distribute_nodes
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+from healthcheck.distribute_nodes import distribute_nodes, get_next_healthchecker, get_healthchecker_name
 
 class WorkerDefinition(TypedDict):
     display_name: str
@@ -537,7 +541,7 @@ def generate_healthchecker_section(
     is_reduced_dataset: bool = False,
     healthcheck_config: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Generate the healthchecker service section.
+    """Generate the healthchecker service section with Ring topology.
     
     Args:
         workers: Dictionary of worker configurations
@@ -553,15 +557,26 @@ def generate_healthchecker_section(
         "interval_ms": "1000",
         "timeout_ms": "1500",
         "max_errors": "3",
-        "initial_delay_seconds": "15",
+        "count": 3, 
+        "stop_grace_period": "10s",  
     }
     
     # Override with config file values if provided
     if healthcheck_config:
-        default_config.update({k: str(v) for k, v in healthcheck_config.items()})
+        for k, v in healthcheck_config.items():
+            if k == "count":
+                # Keep count as integer for validation
+                default_config[k] = v
+            else:
+                # Convert other values to strings for environment variables
+                default_config[k] = str(v)
     
-    # Build list of container names to monitor
-    nodes_to_check = ["coffee-gateway"]  # Gateway is always included
+    # Get number of healthcheckers (validate it's an integer)
+    count_value = default_config.get("count", 3)
+    total_healthcheckers = ensure_int(count_value, "healthchecker count", allow_zero=False)
+    
+    # Build list of all container names to monitor
+    all_nodes = ["coffee-gateway"]  # Gateway is always included
     
     # Add all worker containers
     for key in WORKER_DEFINITIONS:
@@ -585,36 +600,51 @@ def generate_healthchecker_section(
         
         for index in range(1, total_count + 1):
             service_name = build_service_name(meta["base_service_name"], index, total_count)
-            nodes_to_check.append(service_name)
+            all_nodes.append(service_name)
     
-    nodes_to_check_str = " ".join(nodes_to_check)
+    # Generate healthchecker services
+    sections = []
+    plural = "instancias" if total_healthcheckers != 1 else "instancia"
+    sections.append(f"  # Healthcheckers ({total_healthcheckers} {plural})")
     
-    lines = [
-        "  # Healthchecker (1 instancia)",
-        "  healthchecker-1:",
-        "    build:",
-        "      context: .",
-        "      dockerfile: ./src/healthcheck/Dockerfile",
-        "    container_name: healthchecker-1",
-        "    networks:",
-        "      - middleware-network",
-        "    depends_on:",
-        "      rabbitmq:",
-        "        condition: service_healthy",
-        "    environment:",
-        f"      - HEALTHCHECK_PORT={default_config['port']}",
-        f"      - HEALTHCHECK_INTERVAL_MS={default_config['interval_ms']}",
-        f"      - HEALTHCHECK_TIMEOUT_MS={default_config['timeout_ms']}",
-        f"      - HEALTHCHECK_MAX_ERRORS={default_config['max_errors']}",
-        f"      - HEALTHCHECK_INITIAL_DELAY_SECONDS={default_config['initial_delay_seconds']}",
-        f"      - NODES_TO_CHECK={nodes_to_check_str}",
-        "    volumes:",
-        "      - /var/run/docker.sock:/var/run/docker.sock",
-        "    restart: unless-stopped",
-        "",
-    ]
+    for hc_id in range(1, total_healthcheckers + 1):
+        # Distribute nodes to this healthchecker using consistent hashing
+        assigned_nodes = distribute_nodes(all_nodes, hc_id, total_healthcheckers)
+        nodes_to_check_str = " ".join(assigned_nodes)
+        
+        lines = [
+            f"  healthchecker-{hc_id}:",
+            "    build:",
+            "      context: .",
+            "      dockerfile: ./src/healthcheck/Dockerfile",
+            f"    container_name: healthchecker-{hc_id}",
+            "    networks:",
+            "      - middleware-network",
+            "    depends_on:",
+            "      rabbitmq:",
+            "        condition: service_healthy",
+            "    environment:",
+            f"      - HEALTHCHECKER_ID={hc_id}",
+            f"      - TOTAL_HEALTHCHECKERS={total_healthcheckers}",
+            f"      - HEALTHCHECK_PORT={default_config['port']}",
+            f"      - HEALTHCHECK_INTERVAL_MS={default_config['interval_ms']}",
+            f"      - HEALTHCHECK_TIMEOUT_MS={default_config['timeout_ms']}",
+            f"      - HEALTHCHECK_MAX_ERRORS={default_config['max_errors']}",
+            f"      - NODES_TO_CHECK={nodes_to_check_str}",
+            "    volumes:",
+            "      - /var/run/docker.sock:/var/run/docker.sock",
+            f"    stop_grace_period: {default_config['stop_grace_period']}",
+            "    restart: unless-stopped",
+        ]
+        
+        if hc_id < total_healthcheckers:
+            lines.append("")
+        
+        sections.append("\n".join(lines))
     
-    return "\n".join(lines)
+    sections.append("")
+    
+    return "\n".join(sections)
 
 
 def generate_compose(config: Dict[str, Any]) -> str:

@@ -22,7 +22,7 @@
       "LOG_LEVEL": "INFO",
       "DATA_DIR": ".data",
       "REDUCED": true,
-      "SESSIONS": 2
+      "SESSIONS": 1
     }
   },
   "workers": {

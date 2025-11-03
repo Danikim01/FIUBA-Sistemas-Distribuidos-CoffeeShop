@@ -10,7 +10,12 @@ El sistema está compuesto por dos componentes principales:
 Servicio UDP que cada worker (incluyendo el gateway) expone para responder a las verificaciones de salud. Escucha en un puerto UDP configurable y responde con ACK cuando recibe un mensaje de healthcheck.
 
 ### 2. Healthchecker (`healthchecker.py`)
-Proceso centralizado que monitorea todos los servicios configurados, envía mensajes de healthcheck periódicamente y ejecuta `docker restart` cuando detecta que un servicio ha fallado.
+Proceso(es) que monitorea(n) los servicios configurados, envía(n) mensajes de healthcheck periódicamente y ejecuta(n) `docker restart` cuando detecta(n) que un servicio ha fallado.
+
+**Topología Ring**: El sistema soporta múltiples healthcheckers organizados en un anillo (Ring). Cada healthchecker:
+- Monitorea un subconjunto de servicios asignados usando hash consistente
+- Monitorea al siguiente healthchecker en el anillo para detectar fallos
+- Si un healthchecker cae, el anterior en el anillo lo detecta y lo reinicia
 
 ## Protocolo UDP
 
@@ -28,16 +33,21 @@ Flujo:
 
 ### Healthchecker
 
-Configuración del proceso healthchecker (contenedor `healthchecker-1`):
+Configuración del proceso healthchecker (contenedores `healthchecker-1`, `healthchecker-2`, etc.):
 
 | Variable | Default | Descripción |
 |----------|---------|-------------|
+| `HEALTHCHECKER_ID` | `1` | ID único del healthchecker (1, 2, 3, ...) |
+| `TOTAL_HEALTHCHECKERS` | `1` | Número total de healthcheckers en el sistema |
 | `HEALTHCHECK_PORT` | `9290` | Puerto UDP donde escuchan los servicios de healthcheck |
 | `HEALTHCHECK_INTERVAL_MS` | `1000` | Intervalo entre checks en milisegundos |
 | `HEALTHCHECK_TIMEOUT_MS` | `1500` | Timeout para esperar respuesta ACK en milisegundos |
 | `HEALTHCHECK_MAX_ERRORS` | `3` | Número de errores consecutivos antes de reiniciar un servicio |
-| `HEALTHCHECK_INITIAL_DELAY_SECONDS` | `10` | Segundos de espera antes de empezar a monitorear (permite que los servicios se inicien) |
-| `NODES_TO_CHECK` | *(requerido)* | Lista de nombres de contenedores a monitorear, separados por espacios |
+| `NODES_TO_CHECK` | *(requerido)* | Lista de nombres de contenedores a monitorear (asignados por distribución hash), separados por espacios |
+
+**Nota**: El healthchecker espera 3 segundos fijos antes de empezar a monitorear (hardcodeado en el código).
+
+**Nota**: Con múltiples healthcheckers, cada uno recibe automáticamente el siguiente healthchecker en el anillo agregado a su lista de nodos monitoreados.
 
 ### Healthcheck Service
 
@@ -57,7 +67,7 @@ Configuración del servicio de healthcheck en cada worker/gateway:
    - Los logs mostrarán: `"Healthcheck service started on port 9290"`
 
 2. **Healthchecker**:
-   - Espera `HEALTHCHECK_INITIAL_DELAY_SECONDS` segundos antes de empezar a monitorear
+   - Espera 3 segundos fijos antes de empezar a monitorear (permite que los servicios se inicien)
    - Crea un thread por cada servicio a monitorear
    - Los logs mostrarán: `"Starting health monitoring..."`
 
@@ -90,10 +100,71 @@ El healthcheck service se integra automáticamente en:
 
 No requiere configuración adicional en el código de los workers o gateway.
 
+## Shutdown Graceful
+
+### Problema: Diferenciar Shutdown vs Fallo
+
+El healthchecker necesita diferenciar entre:
+- **Nodo que falló** (caída inesperada) → **DEBE ser reiniciado**
+- **Nodo que está siendo detenido** (shutdown ordenado) → **NO debe ser reiniciado**
+
+**Solución**: Detener los healthcheckers **ANTES** que los servicios. De esta manera:
+- Los healthcheckers reciben SIGTERM y detienen el monitoreo (`shutdown_requested = True`)
+- Luego los servicios reciben SIGTERM y se detienen graceful
+- No hay riesgo de que un healthchecker intente reiniciar un servicio que se está deteniendo
+
+### Protocolo de Shutdown
+
+**IMPORTANTE**: Usa el script `stop.sh` en la raíz del proyecto para detener el sistema correctamente:
+
+```bash
+# Detener sistema (detiene healthcheckers primero, luego servicios)
+./stop.sh docker-compose.yml
+
+# Detener y eliminar contenedores
+./stop.sh docker-compose.yml --down
+```
+
+El script hace lo siguiente:
+1. **Detiene healthcheckers primero**: Envía SIGTERM a todos los healthcheckers, que establecen `shutdown_requested = True` y detienen el monitoreo
+2. **Espera 3 segundos**: Para que los healthcheckers se detengan completamente
+3. **Detiene servicios**: Detiene workers, gateway y otros servicios
+4. **Opcional**: Elimina contenedores si pasas `--down`
+
+### ¿Por qué no usar `docker-compose down` directamente?
+
+Si ejecutas `docker-compose down` directamente, Docker envía SIGTERM a **todos los contenedores al mismo tiempo**:
+- Los healthcheckers podrían detectar que un servicio no responde (porque está recibiendo SIGTERM)
+- Podrían intentar reiniciarlo → loop de reinicios durante shutdown
+- Usando `stop.sh`, los healthcheckers se detienen primero y luego los servicios, evitando este problema
+
+### Configuración Múltiples Healthcheckers
+
+Para configurar múltiples healthcheckers con topología Ring, agrega en tu archivo de configuración JSON:
+
+```json
+{
+  "healthchecker": {
+    "count": 3,
+    "port": "9290",
+    "interval_ms": "1000",
+    "timeout_ms": "1500",
+    "max_errors": "3",
+    "stop_grace_period": "10s"
+  }
+}
+```
+
+El script `generate_scaled_compose.py` automáticamente:
+- Genera múltiples servicios `healthchecker-1`, `healthchecker-2`, etc.
+- Distribuye los servicios entre healthcheckers usando hash consistente
+- Configura cada healthchecker para monitorear al siguiente en el anillo
+
 ## Notas
 
 - El healthchecker requiere acceso al socket de Docker (`/var/run/docker.sock`) para poder reiniciar contenedores
 - Los servicios deben estar en la misma red Docker para que la resolución DNS funcione
 - El sistema es tolerante a fallos transitorios (requiere múltiples errores consecutivos antes de reiniciar)
-- Por ahora, solo hay un healthchecker sin consenso. En el futuro se puede extender para múltiples healthcheckers con algoritmo de consenso.
+- Con múltiples healthcheckers, la distribución de servicios es determinística usando hash consistente (hash MD5 del nombre del contenedor)
+- Si un healthchecker cae, el anterior en el anillo lo detecta y lo reinicia automáticamente
 

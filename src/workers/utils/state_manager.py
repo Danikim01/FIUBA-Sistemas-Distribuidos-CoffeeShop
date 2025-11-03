@@ -219,15 +219,7 @@ class StateManager(Generic[T]):
     def update_state_data(self, new_state: T) -> None:
         """Update the state data (used for restoration)."""
         self.state_data = new_state
-    
-    def sync_state_after_load(self) -> None:
-        """
-        Sync the state after loading from disk.
-        This ensures that any external references to state_data are updated.
-        """
-        # This method can be overridden by subclasses if needed
-        pass
-    
+        
     @staticmethod
     def _compute_checksum(payload: Dict[str, Any]) -> str:
         """Compute SHA256 checksum for payload validation."""
@@ -282,6 +274,52 @@ class TPVStateManager(StateManager[DefaultDict[ClientId, DefaultDict[str, Defaul
             self.state_data.update(restored)
         else:
             self.state_data = restored
+    
+    def sync_state_after_load(self) -> None:
+        """
+        Sync the state after loading from disk.
+        Ensures that state_data is a defaultdict structure after restoration.
+        This is important because after loading from JSON, we may have regular dicts.
+        """
+        from collections import defaultdict
+        
+        # If state_data is None, create a new defaultdict structure
+        if self.state_data is None:
+            self.state_data = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+            return
+        
+        # If it's not already a defaultdict, convert it
+        if not isinstance(self.state_data, defaultdict):
+            # Convert to defaultdict structure
+            converted = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+            for client_id, year_map in self.state_data.items():
+                if isinstance(year_map, dict):
+                    for year_half, store_map in year_map.items():
+                        if isinstance(store_map, dict):
+                            for store_id, value in store_map.items():
+                                converted[client_id][year_half][store_id] = value
+            self.state_data = converted
+            return
+        
+        # If it's already a defaultdict, ensure nested structures are also defaultdicts
+        # (in case only the outer dict was converted)
+        for client_id in list(self.state_data.keys()):
+            year_map = self.state_data[client_id]
+            if not isinstance(year_map, defaultdict):
+                # Convert inner dict to defaultdict
+                converted_year = defaultdict(lambda: defaultdict(float))
+                for year_half, store_map in year_map.items():
+                    if isinstance(store_map, dict):
+                        converted_year[year_half] = defaultdict(float, store_map)
+                    else:
+                        converted_year[year_half] = store_map
+                self.state_data[client_id] = converted_year
+            else:
+                # Ensure innermost structures are also defaultdicts
+                for year_half in list(year_map.keys()):
+                    store_map = year_map[year_half]
+                    if not isinstance(store_map, defaultdict):
+                        year_map[year_half] = defaultdict(float, store_map)
     
     def _snapshot_state(self) -> Dict[ClientId, Dict[str, Dict[str, float]]]:
         """Create serializable snapshot of TPV state."""

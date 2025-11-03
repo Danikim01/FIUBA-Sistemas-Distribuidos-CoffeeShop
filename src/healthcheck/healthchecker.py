@@ -49,13 +49,14 @@ class HealthChecker:
         self.max_errors = max_errors
         self.finished = False
         self.finished_lock = threading.Lock()
+        self.shutdown_requested = False  # Flag to prevent restarts during shutdown
         
         logger.info(
             f"HealthChecker initialized - Nodes: {nodes}, Port: {port}, "
             f"Interval: {interval_ms}ms, Timeout: {timeout_ms}ms, MaxErrors: {max_errors}"
         )
     
-    def start(self, initial_delay_seconds: int = 10):
+    def start(self, initial_delay_seconds: int = 3):
         """Start monitoring all nodes in separate threads.
         
         Args:
@@ -285,6 +286,11 @@ class HealthChecker:
         Args:
             container_name: Name of the container to restart
         """
+        # Do not restart nodes during shutdown - they're being stopped gracefully
+        if self.shutdown_requested:
+            logger.debug(f"Shutdown requested, skipping restart of {container_name}")
+            return
+        
         logger.error(f"Node {container_name} is down, restarting...")
         
         try:

@@ -145,7 +145,7 @@ class BaseWorker(ABC):
                             f"expected dict or list, got {type(actual_data).__name__} "
                             f"with value: {actual_data}"
                         )
-                        return
+                        #return
 
                     self._increment_inflight()
                     try:
