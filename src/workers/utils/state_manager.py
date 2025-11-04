@@ -151,6 +151,7 @@ class StateManager(Generic[T]):
         return {}
     
     def persist_state(self) -> None:
+        logger.info("Persisting state to disk at %s", self._state_path)
         """Atomically persist the current state to disk."""
         payload = {
             'id': dict(self._last_processed_message),

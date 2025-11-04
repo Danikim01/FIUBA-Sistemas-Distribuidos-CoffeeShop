@@ -128,7 +128,12 @@ class ShardedTPVWorker(AggregatorWorker):
         self.partial_tpv[client_id][year_half][store_id] += amount
 
     def process_batch(self, batch: list[Dict[str, Any]], client_id: ClientId):
+        if self.shutdown_requested:
+            logger.info("Shutdown requested, rejecting batch to requeue")
+            raise InterruptedError("Shutdown requested before batch processing")
+            
         message_uuid = self._get_current_message_uuid()
+        logger.info(f"Processing batch for client {client_id} with message UUID: {message_uuid}")
         if message_uuid and self.state_manager.get_last_processed_message(client_id) == message_uuid:
             logger.info(
                 "Skipping duplicate batch %s for client %s",
@@ -143,13 +148,21 @@ class ShardedTPVWorker(AggregatorWorker):
 
             try:
                 for entry in batch:
+                    if self.shutdown_requested:
+                        logger.info("Shutdown requested during batch processing, rolling back")
+                        raise InterruptedError("Shutdown requested during batch processing")
                     self.accumulate_transaction(client_id, entry)
 
                 if message_uuid:
                     self.state_manager.set_last_processed_message(client_id, message_uuid)
 
-                self.state_manager.persist_state()
+                if not self.shutdown_requested:
+                    self.state_manager.persist_state()
+                else:
+                    logger.info("Shutdown requested after batch processing, rolling back state")
+                    raise InterruptedError("Shutdown requested, preventing state persistence")
             except Exception:
+                logger.info("Error processing batch for client %s, restoring previous state", client_id)
                 self.state_manager.restore_client_state(client_id, previous_state)
                 if message_uuid:
                     if previous_uuid is None:
@@ -175,6 +188,10 @@ class ShardedTPVWorker(AggregatorWorker):
         return results
 
     def handle_eof(self, message: Dict[str, Any], client_id: ClientId):
+        if self.shutdown_requested:
+            logger.info("Shutdown requested, rejecting EOF to requeue")
+            raise InterruptedError("Shutdown requested before EOF handling")
+            
         with self._pause_message_processing():
             try:
                 super().handle_eof(message, client_id)
@@ -193,7 +210,11 @@ class ShardedTPVWorker(AggregatorWorker):
                         self.state_manager.clear_last_processed_message(client_id)
 
                     self.state_manager.drop_empty_client_state(client_id)
-                    self.state_manager.persist_state()
+                    
+                    if not self.shutdown_requested:
+                        self.state_manager.persist_state()
+                    else:
+                        logger.info("Shutdown requested during EOF handling, skipping state persistence")
                 except Exception:
                     self.state_manager.restore_client_state(client_id, previous_state)
                     if message_uuid:

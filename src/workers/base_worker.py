@@ -116,7 +116,8 @@ class BaseWorker(ABC):
                 """
                 try:
                     if self.shutdown_requested:
-                        return logger.info("Shutdown requested, stopping message processing")
+                        logger.info("Shutdown requested, rejecting message to requeue")
+                        raise InterruptedError("Shutdown requested, message will be requeued")
 
                     self._current_message_metadata = message
 
@@ -127,16 +128,20 @@ class BaseWorker(ABC):
 
                     self._increment_inflight()
                     try:
-                        logger.debug(f"Processing message for client {client_id}")
+                        logger.debug(f"Processing message for client {client_id}, data: {actual_data}")
                         if isinstance(actual_data, list):
+                            logger.info(f"Processing batch of {len(actual_data)} messages for client {client_id}, message id: {message.get('message_uuid')}")
                             self.process_batch(actual_data, client_id)
                         else:
+                            logger.info(f"Processing single message for client {client_id}, message id: {message.get('message_uuid')}")
                             self.process_message(actual_data, client_id)
                     finally:
                         self._decrement_inflight()
 
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
+                    # Re-raise the exception so the middleware can NACK
+                    raise
                 finally:
                     self._current_message_metadata = None
 
