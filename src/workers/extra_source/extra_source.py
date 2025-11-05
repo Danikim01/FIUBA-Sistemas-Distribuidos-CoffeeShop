@@ -47,8 +47,21 @@ class ExtraSource(ABC):
 
                 self._handle_data(data)
 
+            except InterruptedError:
+                logger.info(
+                    "Processing interrupted for extra source %s, message will be requeued",
+                    self.name,
+                )
+                raise
             except Exception as e:
-                logger.error(f"Error interno iniciando consumo: Error procesando mensaje: {e}")
+                logger.error(
+                    "Error interno iniciando consumo: Error procesando mensaje en extra source %s para cliente %s: %s",
+                    self.name,
+                    getattr(self, "current_client_id", ""),
+                    e,
+                    exc_info=True,
+                )
+                raise
 
         try:
             self.middleware.start_consuming(on_message)
