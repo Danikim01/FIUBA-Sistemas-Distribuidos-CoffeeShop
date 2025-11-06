@@ -49,6 +49,7 @@ class StateManager(Generic[T]):
             worker_id: Worker identifier for unique state files
             worker_type: Type of worker for naming
         """
+        logger.info("[STATE-MANAGER] [INIT] Initializing StateManager for worker_id=%s, worker_type=%s", worker_id, worker_type)
         self.state_data = state_data
         self.worker_id = worker_id
         self.worker_type = worker_type
@@ -98,12 +99,10 @@ class StateManager(Generic[T]):
                 id_map, state_map = self._read_state_payload(path)
                 self._last_processed_message = dict(id_map)
                 self._restore_state_from_map(state_map)
-                logger.info("Loaded persisted state from %s", path)
                 return
             except Exception as exc:
-                logger.warning("Failed to load state from %s: %s", path, exc)
-        logger.info("No valid state found; starting with empty state")
-    
+                logger.warning("[LOAD-STATE] [FAILED] Failed to load state from %s: %s", path, exc)
+        logger.info("[LOAD-STATE] No state found, starting with empty state")
     def _read_state_payload(
         self,
         path: Path,
@@ -151,8 +150,8 @@ class StateManager(Generic[T]):
         return {}
     
     def persist_state(self) -> None:
-        logger.info("Persisting state to disk at %s", self._state_path)
         """Atomically persist the current state to disk."""
+        logger.info("[PERSIST] Persisting state to disk")
         payload = {
             'id': dict(self._last_processed_message),
             'state': self._snapshot_state(),
@@ -161,25 +160,28 @@ class StateManager(Generic[T]):
         serialized = payload | {'checksum': checksum}
 
         self._ensure_state_dir()
+        
         try:
             with self._temp_path.open('w', encoding='utf-8') as handle:
                 json.dump(serialized, handle, ensure_ascii=False, sort_keys=True)
+                
                 handle.flush()
+                
                 os.fsync(handle.fileno())
-
+            
             if self._state_path.exists():
                 os.replace(self._state_path, self._backup_path)
-
             os.replace(self._temp_path, self._state_path)
         except Exception as exc:
-            logger.error("Failed to persist state to disk: %s", exc)
+            logger.error("[PERSIST] [ERROR] Failed to persist state to disk: %s", exc)
             with contextlib.suppress(FileNotFoundError):
                 self._temp_path.unlink()
             raise
     
     def get_last_processed_message(self, client_id: ClientId) -> str | None:
         """Get the last processed message UUID for a client."""
-        return self._last_processed_message.get(client_id)
+        uuid = self._last_processed_message.get(client_id)
+        return uuid
     
     def set_last_processed_message(self, client_id: ClientId, message_uuid: str) -> None:
         """Set the last processed message UUID for a client."""

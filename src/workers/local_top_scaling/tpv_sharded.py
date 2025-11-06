@@ -13,8 +13,39 @@ from workers.local_top_scaling.aggregator_worker import AggregatorWorker
 from workers.utils.sharding_utils import get_routing_key, extract_store_id_from_payload
 from workers.utils.state_manager import TPVStateManager
 
+# Configurar logging básico
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Configurar FileHandler para escribir logs a archivo
+def setup_file_logging(worker_id: int):
+    """Configura un FileHandler para escribir logs a un archivo basado en worker_id."""
+    # Crear directorio de logs si no existe
+    log_dir = Path("/app/logs")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Crear archivo de log con nombre basado en worker_id
+    log_file = log_dir / f"tpv_sharded_worker_{worker_id}.log"
+    
+    # Crear FileHandler
+    file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+    file_handler.setLevel(logging.INFO)
+    
+    # Formato para el archivo (más detallado)
+    # El worker_id ya está en el nombre del archivo, así que no es necesario incluirlo en cada línea
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    file_handler.setFormatter(formatter)
+    
+    # Agregar handler al logger raíz para capturar todos los logs
+    root_logger = logging.getLogger()
+    root_logger.addHandler(file_handler)
+    
+    # También agregar al logger específico
+    logger.addHandler(file_handler)
+    
+    logger.info(f"File logging configured: {log_file}")
 
 YearHalf = str
 StoreId = int
@@ -31,6 +62,9 @@ class ShardedTPVWorker(AggregatorWorker):
         # Get sharding configuration from environment
         self.num_shards = int(os.getenv('NUM_SHARDS', '2'))
         self.worker_id = int(os.getenv('WORKER_ID', '0'))
+        
+        # Setup file logging for this worker
+        setup_file_logging(self.worker_id)
         
         # Validate worker_id is within shard range
         if self.worker_id >= self.num_shards:
@@ -53,24 +87,19 @@ class ShardedTPVWorker(AggregatorWorker):
         elif state_dir_env:
             state_dir = Path(state_dir_env)
 
-        # Initialize state manager (it will create its own state)
         self.state_manager = TPVStateManager(
-            state_data=None,  # Let StateManager create its own state
+            state_data=None,
             state_path=state_path,
             state_dir=state_dir,
             worker_id=str(self.worker_id)
         )
         
-        # Get reference to the state data managed by StateManager
-        # Always use state_data directly from the manager to ensure defaultdict structure
         from collections import defaultdict
         state_data = self.state_manager.state_data
         if state_data is None or not isinstance(state_data, defaultdict):
-            # Create a new defaultdict if state_data is None or not a defaultdict
             state_data = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
             self.state_manager.state_data = state_data
         
-        # Ensure partial_tpv always points to the state_manager's state_data
         self.partial_tpv = self.state_manager.state_data
 
     def reset_state(self, client_id: ClientId) -> None:
@@ -90,15 +119,10 @@ class ShardedTPVWorker(AggregatorWorker):
         Returns:
             True if this worker should process the transaction
         """
-        # Check if this is a control message (EOF, heartbeat, etc.)
-        # Control messages like EOF don't have store_id and should be processed by all workers
         store_id = extract_store_id_from_payload(payload)
         if store_id is None:
-            # This is likely a control message (EOF, etc.) - process it
-            logger.debug(f"Received control message (no store_id): {payload}")
             return False
             
-        # For regular transactions, verify they belong to our shard
         expected_routing_key = get_routing_key(store_id, self.num_shards)
         if expected_routing_key != self.expected_routing_key:
             logger.warning(f"Received transaction for wrong shard: store_id={store_id}, expected={self.expected_routing_key}, got={expected_routing_key}")
@@ -129,14 +153,14 @@ class ShardedTPVWorker(AggregatorWorker):
 
     def process_batch(self, batch: list[Dict[str, Any]], client_id: ClientId):
         if self.shutdown_requested:
-            logger.info("Shutdown requested, rejecting batch to requeue")
+            logger.info("[BATCH-FLOW] Shutdown requested, rejecting batch to requeue")
             raise InterruptedError("Shutdown requested before batch processing")
             
         message_uuid = self._get_current_message_uuid()
-        logger.info(f"Processing batch for client {client_id} with message UUID: {message_uuid}")
+
         if message_uuid and self.state_manager.get_last_processed_message(client_id) == message_uuid:
             logger.info(
-                "Skipping duplicate batch %s for client %s",
+                "[PROCESSING - BATCH] [DUPLICATE] Skipping duplicate batch %s for client %s (already processed)",
                 message_uuid,
                 client_id,
             )
@@ -147,11 +171,14 @@ class ShardedTPVWorker(AggregatorWorker):
             previous_uuid = self.state_manager.get_last_processed_message(client_id)
 
             try:
-                for entry in batch:
+                for idx, entry in enumerate(batch):
                     if self.shutdown_requested:
-                        logger.info("Shutdown requested during batch processing, rolling back")
+                        logger.info("[PROCESSING - BATCH] [INTERRUPT] Shutdown requested during batch processing, rolling back")
                         raise InterruptedError("Shutdown requested during batch processing")
+
                     self.accumulate_transaction(client_id, entry)
+
+                logger.info(f"All {len(batch)} transactions accumulated successfully")
 
                 if message_uuid:
                     self.state_manager.set_last_processed_message(client_id, message_uuid)
@@ -159,15 +186,18 @@ class ShardedTPVWorker(AggregatorWorker):
                 if not self.shutdown_requested:
                     self.state_manager.persist_state()
                 else:
-                    logger.info("Shutdown requested after batch processing, rolling back state")
+                    logger.info("[PROCESSING - BATCH] [INTERRUPT] Shutdown requested after batch processing, rolling back state")
                     raise InterruptedError("Shutdown requested, preventing state persistence")
-            except Exception:
-                logger.info("Error processing batch for client %s, restoring previous state", client_id)
+            except Exception as e:
+                logger.error(f"[BATCH-FLOW] [ERROR] Exception during batch processing: {type(e).__name__}: {e}")
+                logger.info("[BATCH-FLOW] [ROLLBACK] Restoring previous state and UUID")
                 self.state_manager.restore_client_state(client_id, previous_state)
                 if message_uuid:
                     if previous_uuid is None:
+                        logger.info("[BATCH-FLOW] [ROLLBACK] Clearing last_processed_message (was None)")
                         self.state_manager.clear_last_processed_message(client_id)
                     else:
+                        logger.info(f"[BATCH-FLOW] [ROLLBACK] Restoring previous UUID: {previous_uuid}")
                         self.state_manager.set_last_processed_message(client_id, previous_uuid)
                 raise
 
