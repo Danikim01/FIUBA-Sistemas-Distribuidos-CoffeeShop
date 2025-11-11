@@ -11,7 +11,7 @@ from message_utils import ClientId # pyright: ignore[reportMissingImports]
 from worker_utils import run_main, safe_float_conversion, safe_int_conversion, extract_year_half # pyright: ignore[reportMissingImports]
 from workers.local_top_scaling.aggregator_worker import AggregatorWorker
 from workers.utils.sharding_utils import get_routing_key, extract_store_id_from_payload
-from workers.utils.state_manager import TPVStateManager
+from workers.utils.improved_state_manager import ImprovedTPVStateManager
 
 # Configurar logging básico
 logging.basicConfig(level=logging.INFO)
@@ -87,7 +87,7 @@ class ShardedTPVWorker(AggregatorWorker):
         elif state_dir_env:
             state_dir = Path(state_dir_env)
 
-        self.state_manager = TPVStateManager(
+        self.state_manager = ImprovedTPVStateManager(
             state_data=None,
             state_path=state_path,
             state_dir=state_dir,
@@ -164,7 +164,7 @@ class ShardedTPVWorker(AggregatorWorker):
         # This is a safety check, but the root cause should be fixed in the sharding router.
         if client_id in self._clients_with_eof:
             message_uuid = self._get_current_message_uuid()
-            logger.error(
+            logger.info(
                 "[PROCESSING - BATCH] [PROTOCOL-ERROR] Batch %s for client %s arrived AFTER EOF (protocol violation). "
                 "This indicates the sharding router sent EOF before all batches were delivered. "
                 "Discarding batch to prevent incorrect processing.",
@@ -202,7 +202,7 @@ class ShardedTPVWorker(AggregatorWorker):
 
                 if not self.shutdown_requested:
                     logger.info(f"[BATCH-FLOW] [PERSIST] About to persist state for client {client_id}, message_uuid={message_uuid}")
-                    self.state_manager.persist_state()
+                    self.state_manager.persist_state(client_id)  # Persist only this client
                     logger.info(f"[BATCH-FLOW] [PERSIST] State persisted successfully for client {client_id}, message_uuid={message_uuid}")
                 else:
                     logger.info("[PROCESSING - BATCH] [INTERRUPT] Shutdown requested after batch processing, rolling back state")
@@ -315,7 +315,7 @@ class ShardedTPVWorker(AggregatorWorker):
                     self.state_manager.drop_empty_client_state(client_id)
                     
                     if not self.shutdown_requested:
-                        self.state_manager.persist_state()
+                        self.state_manager.persist_state(client_id)  # Persist only this client
                     else:
                         logger.info("Shutdown requested during EOF handling, skipping state persistence")
                 except Exception:

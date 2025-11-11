@@ -5,7 +5,6 @@
 import logging
 import os
 import threading
-import time
 import uuid
 from collections import defaultdict
 from typing import Any, Dict, List
@@ -22,27 +21,23 @@ class ShardingRouter(BaseWorker):
     """
     Router that receives transactions and distributes them to sharded workers
     based on store_id using routing keys.
+    
+    Batches are sent immediately when they reach batch_size, or when EOF arrives.
+    No timer-based flushing - simpler and eliminates race conditions.
     """
     
     def __init__(self):
         super().__init__()
         self.num_shards = int(os.getenv('NUM_SHARDS', '2'))
         
-        # Batch configuration
+        # Batch configuration - maximum batch size
         self.batch_size = int(os.getenv('BATCH_SIZE', '100'))
-        self.batch_timeout = float(os.getenv('BATCH_TIMEOUT', '1.0'))  # seconds
         
         # Batch storage: {client_id: {routing_key: [messages]}}
         self.batches: Dict[ClientId, Dict[str, List[Any]]] = defaultdict(lambda: defaultdict(list))
-        self.batch_timers: Dict[ClientId, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
         self.batch_lock = threading.RLock()
         
-        # Start batch flush timer
-        self.flush_timer = threading.Timer(self.batch_timeout, self._flush_all_batches)
-        self.flush_timer.daemon = True
-        self.flush_timer.start()
-        
-        logger.info(f"ShardingRouter initialized with {self.num_shards} shards, batch_size={self.batch_size}, batch_timeout={self.batch_timeout}s")
+        logger.info(f"ShardingRouter initialized with {self.num_shards} shards, batch_size={self.batch_size}")
 
     def process_message(self, message: Any, client_id: ClientId) -> None:
         """
@@ -61,12 +56,14 @@ class ShardingRouter(BaseWorker):
         # Calculate routing key for this store_id
         routing_key = get_routing_key(store_id, self.num_shards)
         
-        # Add message to batch
+        # Add message to batch and flush if full
         self._add_to_batch(client_id, routing_key, message)
-        
+    
     def process_batch(self, batch: list, client_id: ClientId) -> None:
         """
         Process a batch of messages and add them to appropriate shard batches.
+        
+        Messages are distributed by shard and sent immediately when batch_size is reached.
         
         Args:
             batch: List of messages to process
@@ -77,7 +74,7 @@ class ShardingRouter(BaseWorker):
 
     def _add_to_batch(self, client_id: ClientId, routing_key: str, message: Any) -> None:
         """
-        Add a message to the appropriate shard batch.
+        Add a message to the appropriate shard batch and flush if batch is full.
         
         Args:
             client_id: Client identifier
@@ -88,10 +85,7 @@ class ShardingRouter(BaseWorker):
             # Add message to batch
             self.batches[client_id][routing_key].append(message)
             
-            # Update timer for this batch
-            self.batch_timers[client_id][routing_key] = time.time()
-            
-            # Check if batch is full
+            # If batch is full, flush it immediately
             if len(self.batches[client_id][routing_key]) >= self.batch_size:
                 self._flush_batch(client_id, routing_key)
     
@@ -110,7 +104,7 @@ class ShardingRouter(BaseWorker):
             batch = self.batches[client_id][routing_key]
             if not batch:
                 return
-                
+            
             # Send batch
             logger.info(f"Flushing batch for client {client_id}, shard {routing_key}, size: {len(batch)}")
             self.send_message(
@@ -122,91 +116,12 @@ class ShardingRouter(BaseWorker):
             
             # Clear batch
             self.batches[client_id][routing_key] = []
-            if routing_key in self.batch_timers[client_id]:
-                del self.batch_timers[client_id][routing_key]
-    
-    def _flush_all_batches(self) -> None:
-        """
-        Flush all batches that have exceeded the timeout.
-        
-        Note: This method will skip clients that are not in batch_timers,
-        which indicates they are being processed by handle_eof.
-        """
-        current_time = time.time()
-        clients_to_remove = []
-        
-        with self.batch_lock:
-            for client_id, shard_batches in self.batches.items():
-                # Skip clients that are not in batch_timers - they are being processed by handle_eof
-                # This prevents race conditions where the timer might send batches after handle_eof
-                # has cleaned up the batches but before it sends the EOF
-                if client_id not in self.batch_timers:
-                    logger.debug(f"Skipping client {client_id} in timer flush - being processed by handle_eof")
-                    continue
-                
-                routing_keys_to_remove = []
-                
-                for routing_key, batch in shard_batches.items():
-                    if not batch:
-                        continue
-                    
-                    # Double-check that client is still in batch_timers (might have been removed by handle_eof)
-                    # This prevents race conditions where handle_eof removes the client while timer is processing
-                    if client_id not in self.batch_timers:
-                        logger.debug(f"Client {client_id} removed from batch_timers during timer flush - skipping")
-                        break
-                    
-                    # Check if routing_key has a timer entry
-                    if routing_key not in self.batch_timers[client_id]:
-                        continue
-                        
-                    # Check if batch has timed out
-                    last_update = self.batch_timers[client_id].get(routing_key, 0)
-                    if current_time - last_update >= self.batch_timeout:
-                        logger.info(f"Timeout flush for client {client_id}, shard {routing_key}, size: {len(batch)}")
-                        self.send_message(
-                            client_id,
-                            batch,
-                            routing_key=routing_key,
-                            message_uuid=str(uuid.uuid4()),
-                        )
-                        routing_keys_to_remove.append(routing_key)
-                
-                # Clean up flushed batches
-                for routing_key in routing_keys_to_remove:
-                    self.batches[client_id][routing_key] = []
-                    if routing_key in self.batch_timers[client_id]:
-                        del self.batch_timers[client_id][routing_key]
-                
-                # Remove client if no batches left
-                if not any(self.batches[client_id].values()):
-                    clients_to_remove.append(client_id)
-            
-            # Clean up empty clients
-            for client_id in clients_to_remove:
-                if client_id in self.batches:
-                    del self.batches[client_id]
-                if client_id in self.batch_timers:
-                    del self.batch_timers[client_id]
-        
-        # Restart timer
-        self.flush_timer = threading.Timer(self.batch_timeout, self._flush_all_batches)
-        self.flush_timer.daemon = True
-        self.flush_timer.start()
     
     def handle_eof(self, message: Dict[str, Any], client_id: ClientId) -> None:
         """
-        Handle EOF by flushing all remaining batches for the client.
+        Handle EOF by flushing all remaining batches for the client, then sending EOF.
         
-        This ensures all batches are sent BEFORE the EOF for each shard. The strategy is:
-        1. Acquire the batch_lock to prevent timer from processing this client
-        2. Mark the client as EOF-pending to prevent timer from flushing batches for this client
-        3. Flush ALL remaining batches for each shard (including any that might be in-flight from timer)
-        4. Send EOF to each shard only after all batches for that shard have been sent
-        
-        This synchronization ensures that each sharded worker receives all its batches
-        before receiving the EOF, preventing protocol violations where batches arrive
-        after EOF.
+        This ensures all batches are sent BEFORE the EOF for each shard.
         
         Args:
             message: EOF message
@@ -215,16 +130,8 @@ class ShardingRouter(BaseWorker):
         logger.info(f"Received EOF for client {client_id}, flushing all remaining batches per shard")
         
         with self._pause_message_processing():
-            # Acquire the lock to ensure timer cannot process this client while we're handling EOF
-            # This ensures that ALL batches are sent before EOF, not just the ones we see
+            # Collect all remaining batches to flush, grouped by shard
             with self.batch_lock:
-                # Mark this client as EOF-pending by removing it from batch_timers
-                # This way _flush_all_batches won't process it even if it's already in the loop
-                if client_id in self.batch_timers:
-                    del self.batch_timers[client_id]
-                
-                # Collect ALL remaining batches to flush, grouped by shard
-                # We do this while holding the lock to ensure we get all batches
                 batches_by_shard = {}
                 if client_id in self.batches:
                     for routing_key in list(self.batches[client_id].keys()):
@@ -265,18 +172,12 @@ class ShardingRouter(BaseWorker):
                 )
             
             logger.info(f"EOF propagation completed for client {client_id} to all {self.num_shards} shards")
-
-        
     
     def cleanup(self) -> None:
         """
         Clean up resources and flush any remaining batches.
         """
         logger.info("Cleaning up ShardingRouter, flushing all remaining batches")
-        
-        # Stop the timer
-        if hasattr(self, 'flush_timer') and self.flush_timer:
-            self.flush_timer.cancel()
         
         # Flush all remaining batches
         with self.batch_lock:

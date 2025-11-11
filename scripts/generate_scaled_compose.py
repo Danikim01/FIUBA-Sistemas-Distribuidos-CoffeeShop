@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -244,6 +245,9 @@ def apply_uniform_scale(config: Dict[str, Any], raw_scale: Optional[int]) -> Non
         meta = WORKER_DEFINITIONS.get(worker_key)
         if meta is None or not meta["scalable"]:
             continue
+        # Skip top_clients - it's always 4 shards regardless of scale parameter
+        if worker_key == "top_clients":
+            continue
         if not isinstance(worker_cfg, dict):
             raise SystemExit(
                 f"Worker '{worker_key}' configuration must be an object to apply scaling"
@@ -397,7 +401,10 @@ def load_worker_settings(raw_workers: Mapping[str, Any]) -> Dict[str, WorkerConf
 
         count_value = worker_cfg.get("count")
         if meta["scalable"]:
-            if count_value is None:
+            # Force top_clients to always have 4 shards
+            if name == "top_clients":
+                count = 4
+            elif count_value is None:
                 count = 1
             else:
                 count = ensure_int(count_value, f"Worker '{name}' count", allow_zero=False)
@@ -527,8 +534,11 @@ def generate_worker_sections(
                 # Fix the INPUT_QUEUE to include the shard number
                 if "INPUT_QUEUE" in environment:
                     base_queue = environment["INPUT_QUEUE"]
-                    if not base_queue.endswith("_0") and not base_queue.endswith("_1"):
-                        environment["INPUT_QUEUE"] = f"{base_queue}_{index - 1}"
+                    # Remove any existing shard suffix (e.g., _0, _1, _2, _3)
+                    # This handles cases where the base queue might already have a suffix
+                    base_queue_clean = re.sub(r'_\d+$', '', base_queue)
+                    # Add the correct shard number (0-based index)
+                    environment["INPUT_QUEUE"] = f"{base_queue_clean}_{index - 1}"
 
             if key in SHARDED_WORKER_KEYS:
                 environment["NUM_SHARDS"] = str(total_count)
