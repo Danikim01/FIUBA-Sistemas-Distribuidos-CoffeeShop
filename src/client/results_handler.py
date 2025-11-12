@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Tuple
 
 from results_validator import ResultsValidator
 
@@ -62,6 +62,7 @@ class ResultsHandler:
 
         self._initialized_clients: set[str] = set()
         self.current_client_id: str = ""
+        self._validation_results: List[Tuple[str, bool, str]] = []
 
     def reset_session_state(self):
         """Reset state for a new session."""
@@ -71,6 +72,7 @@ class ResultsHandler:
             self.validator.reset()
         self._amount_validation_pending = False
         self._amount_validation_finalized = False
+        self._validation_results.clear()
         logger.info("Results handler state reset for new session")
 
     def _initialize_client_files(self, client_id: str) -> Path:
@@ -136,10 +138,7 @@ class ResultsHandler:
 
         success, detail = outcome
         label = self.validator.get_label(result_type)
-        if success:
-            logger.info("Validación exitosa (%s): %s", label, detail)
-        else:
-            logger.error("Validación fallida (%s): %s", label, detail)
+        self._validation_results.append((label, success, detail))
 
         if result_type == "AMOUNT_FILTER_TRANSACTIONS":
             self._amount_validation_finalized = True
@@ -155,6 +154,23 @@ class ResultsHandler:
             return
 
         self._validate_result("AMOUNT_FILTER_TRANSACTIONS", [], final=True)
+
+    def print_validation_summary(self) -> None:
+        """Print a summary of all validation results."""
+        if not self.validator.enabled or not self._validation_results:
+            return
+
+        logger.info("=" * 60)
+        logger.info("RESUMEN DE RESULTADOS")
+        logger.info("=" * 60)
+        
+        for label, success, detail in self._validation_results:
+            if success:
+                logger.info("✓ Validación exitosa (%s): %s", label, detail)
+            else:
+                logger.error("✗ Validación fallida (%s): %s", label, detail)
+        
+        logger.info("=" * 60)
 
     def _render_amount_transactions(self, payload: Dict[str, Any], client_id: str) -> List[Dict[str, Any]]:
         """Persist amount-filtered transactions into a dedicated file."""
@@ -455,3 +471,4 @@ class ResultsHandler:
         finally:
             self._finalize_amount_transactions_validation()
             logger.info(f"Total query 1 results received: {self.query1_items_received}")
+            self.print_validation_summary()
