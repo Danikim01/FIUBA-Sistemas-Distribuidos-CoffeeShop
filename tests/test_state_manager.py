@@ -16,21 +16,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Import the improved state manager
 import sys
-# Add paths like other tests do
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SRC_PATH = PROJECT_ROOT / "src"
-UTILS_PATH = PROJECT_ROOT / "src" / "workers" / "utils"
+WORKERS_PATH = SRC_PATH / "workers"
+UTILS_PATH = WORKERS_PATH / "utils"
 
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
+if str(WORKERS_PATH) not in sys.path:
+    sys.path.insert(0, str(WORKERS_PATH))
 if str(UTILS_PATH) not in sys.path:
     sys.path.insert(0, str(UTILS_PATH))
 
-from workers.utils.improved_state_manager import ImprovedTPVStateManager
+from state_manager import TPVStateManager
 from message_utils import ClientId
 
 # Test directory
@@ -53,7 +52,7 @@ def test_basic_persistence():
     cleanup_test_dir()
     
     # Create state manager
-    state_manager = ImprovedTPVStateManager(
+    state_manager = TPVStateManager(
         state_dir=TEST_STATE_DIR,
         worker_id="test-1"
     )
@@ -79,7 +78,7 @@ def test_basic_persistence():
     assert metadata_file.exists(), "Metadata file should exist"
     
     # Create new state manager and load
-    state_manager2 = ImprovedTPVStateManager(
+    state_manager2 = TPVStateManager(
         state_dir=TEST_STATE_DIR,
         worker_id="test-1"
     )
@@ -102,7 +101,7 @@ def test_multiple_clients():
     
     cleanup_test_dir()
     
-    state_manager = ImprovedTPVStateManager(
+    state_manager = TPVStateManager(
         state_dir=TEST_STATE_DIR,
         worker_id="test-2"
     )
@@ -120,7 +119,7 @@ def test_multiple_clients():
         assert client_file.exists(), f"Client file for {client_id} should exist"
     
     # Load and verify
-    state_manager2 = ImprovedTPVStateManager(
+    state_manager2 = TPVStateManager(
         state_dir=TEST_STATE_DIR,
         worker_id="test-2"
     )
@@ -141,7 +140,7 @@ def test_incremental_persistence():
     
     cleanup_test_dir()
     
-    state_manager = ImprovedTPVStateManager(
+    state_manager = TPVStateManager(
         state_dir=TEST_STATE_DIR,
         worker_id="test-3"
     )
@@ -201,7 +200,7 @@ def test_atomicity():
     
     cleanup_test_dir()
     
-    state_manager = ImprovedTPVStateManager(
+    state_manager = TPVStateManager(
         state_dir=TEST_STATE_DIR,
         worker_id="test-4"
     )
@@ -236,7 +235,7 @@ def test_atomicity():
     
     # Try to load - should handle corruption gracefully
     try:
-        state_manager2 = ImprovedTPVStateManager(
+        state_manager2 = TPVStateManager(
             state_dir=TEST_STATE_DIR,
             worker_id="test-4"
         )
@@ -260,7 +259,7 @@ def test_performance_comparison():
     num_clients = 100
     
     # Test improved state manager
-    state_manager = ImprovedTPVStateManager(
+    state_manager = TPVStateManager(
         state_dir=TEST_STATE_DIR,
         worker_id="test-perf"
     )
@@ -281,7 +280,7 @@ def test_performance_comparison():
     
     # Test loading
     start_time = time.time()
-    state_manager2 = ImprovedTPVStateManager(
+    state_manager2 = TPVStateManager(
         state_dir=TEST_STATE_DIR,
         worker_id="test-perf"
     )
@@ -309,7 +308,7 @@ def test_rollback_functionality():
     
     cleanup_test_dir()
     
-    state_manager = ImprovedTPVStateManager(
+    state_manager = TPVStateManager(
         state_dir=TEST_STATE_DIR,
         worker_id="test-6"
     )
@@ -347,7 +346,7 @@ def test_empty_state_handling():
     
     cleanup_test_dir()
     
-    state_manager = ImprovedTPVStateManager(
+    state_manager = TPVStateManager(
         state_dir=TEST_STATE_DIR,
         worker_id="test-7"
     )
@@ -379,7 +378,7 @@ def test_crash_recovery():
     cleanup_test_dir()
     
     # Create initial state
-    state_manager = ImprovedTPVStateManager(
+    state_manager = TPVStateManager(
         state_dir=TEST_STATE_DIR,
         worker_id="test-8"
     )
@@ -407,7 +406,7 @@ def test_crash_recovery():
         f.write("corrupted json content {")
     
     # Create new state manager - should recover from backup
-    state_manager2 = ImprovedTPVStateManager(
+    state_manager2 = TPVStateManager(
         state_dir=TEST_STATE_DIR,
         worker_id="test-8"
     )
@@ -446,7 +445,7 @@ def test_temp_file_cleanup():
     assert temp_file.exists(), "Temp file should exist before cleanup"
     
     # Create state manager - should clean up temp file
-    state_manager = ImprovedTPVStateManager(
+    state_manager = TPVStateManager(
         state_dir=TEST_STATE_DIR,
         worker_id="test-9"
     )
