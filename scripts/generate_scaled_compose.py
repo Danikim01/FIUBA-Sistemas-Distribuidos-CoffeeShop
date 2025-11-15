@@ -15,13 +15,18 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, TypedDic
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from healthcheck.distribute_nodes import distribute_nodes, get_next_healthchecker, get_healthchecker_name
 
-class WorkerDefinition(TypedDict):
+class WorkerDefinitionRequired(TypedDict):
     display_name: str
     base_service_name: str
     command: List[str]
     needs_worker_id: bool
     required_environment: List[str]
     scalable: bool
+
+
+class WorkerDefinition(WorkerDefinitionRequired, total=False):
+    extra_volumes: List[str]
+    stateful: bool
 
 
 @dataclass
@@ -86,6 +91,8 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "needs_worker_id": True,
         "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": True,
+        "extra_volumes": ["./logs:/app/logs"],
+        "stateful": True,
     },
     "tpv_aggregator": {
         "display_name": "TPV Aggregator",
@@ -94,6 +101,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "needs_worker_id": False,
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": False,
+        "stateful": True,
     },
     "items_top": {
         "display_name": "Top Items Workers",
@@ -118,6 +126,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "needs_worker_id": True,
         "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": True,
+        "stateful": True,
     },
     "items_aggregator": {
         "display_name": "Top Items Aggregator",
@@ -126,6 +135,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "needs_worker_id": False,
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": False,
+        "stateful": True,
     },
     "top_clients_sharding_router": {
         "display_name": "Top Clients Sharding Router",
@@ -142,6 +152,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "needs_worker_id": True,
         "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": True,
+        "stateful": True,
     },
     "top_clients_birthdays": {
         "display_name": "Top Clients Birthdays Aggregator",
@@ -150,6 +161,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "needs_worker_id": False,
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": False,
+        "stateful": True,
     },
 }
 
@@ -557,11 +569,18 @@ def generate_worker_sections(
 
             lines.append(f"    command: {format_command(meta['command'])}")
             lines.append("    restart: unless-stopped")
-            
-            # Add volumes for TPV sharded workers (logs persistence)
-            if key == "tpv_sharded":
+
+            volume_mounts: List[str] = []
+            extra_volumes = meta.get("extra_volumes")
+            if extra_volumes:
+                volume_mounts.extend(extra_volumes)
+            if meta.get("stateful"):
+                volume_mounts.append("./state:/app/state")
+
+            if volume_mounts:
                 lines.append("    volumes:")
-                lines.append("      - ./logs:/app/logs")
+                for mount in volume_mounts:
+                    lines.append(f"      - {mount}")
 
             sections.append("\n".join(lines))
 

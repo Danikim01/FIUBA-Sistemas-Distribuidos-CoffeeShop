@@ -2,7 +2,7 @@ import logging
 import os
 import threading
 from contextlib import suppress
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from message_utils import ClientId, create_message_with_metadata, extract_data_and_client_id, extract_eof_metadata
 from middleware_config import MiddlewareConfig
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
@@ -22,13 +22,8 @@ class EOFHandler:
         self.is_sharded_worker = os.getenv('IS_SHARDED_WORKER') == 'True'
         
         self.middleware_config = middleware_config
-        
-        # Only create and consume from EOF requeue queue if NOT a sharded worker
-        if self.is_sharded_worker:
-            logger.info(f"Worker {self.worker_id} is a sharded worker - skipping EOF requeue queue setup")
-            self.eof_consumer = None
-        else:
-            self.eof_consumer: RabbitMQMiddlewareQueue = middleware_config.create_eof_requeue()
+
+        self.eof_consumer: Optional[RabbitMQMiddlewareQueue] = None
         
         self.consuming_thread = None
 
@@ -173,13 +168,15 @@ class EOFHandler:
 
     def start_consuming(self, on_message):
         """Start the consuming thread."""
-        # Sharded workers don't consume from EOF requeue queue
+        # Sharded workers don't consume from EOF requeue queue. Only create and consume from EOF requeue queue if NOT a sharded worker
         if self.is_sharded_worker:
-            logger.info(f"Worker {self.worker_id} is a sharded worker - skipping EOF requeue queue consumption")
+            logger.info(f"Worker {self.worker_id} is a sharded worker - skipping EOF requeue queue")
             return
         
         def _start_consuming():
             try:
+                if self.eof_consumer is None:
+                    self.eof_consumer = self.middleware_config.create_eof_requeue()
                 logger.info(f"[DEBUG] Worker {self.worker_id} starting EOF consumer for queue: {self.eof_consumer.queue_name}")
                 self.eof_consumer.start_consuming(on_message)
             except Exception as exc:  # noqa: BLE001

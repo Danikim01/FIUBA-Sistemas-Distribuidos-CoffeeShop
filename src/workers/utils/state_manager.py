@@ -81,8 +81,8 @@ class StateManager(Generic[T]):
         if state_data is not None and self.state_data is not state_data:
             # Update the original reference to point to our managed state
             if hasattr(state_data, 'clear') and hasattr(state_data, 'update'):
-                state_data.clear()
-                state_data.update(self.state_data)
+                state_data.clear() # type: ignore
+                state_data.update(self.state_data) # type: ignore
     
     def _ensure_state_dir(self) -> None:
         """Ensure the state directory exists."""
@@ -917,7 +917,7 @@ class ItemsStateManager(StateManager[tuple[DefaultDict[ClientId, DefaultDict[str
         
         if quantity_snapshot or profit_snapshot:
             snapshot = {
-                'quantity': quantity_snapshot,
+                'quantity': quantity_snapshot, # type: ignore
                 'profit': profit_snapshot
             }
         

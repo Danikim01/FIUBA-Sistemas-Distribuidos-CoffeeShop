@@ -1,9 +1,7 @@
 """Base worker class providing common functionality for all workers."""
 
 import logging
-import os
 import signal
-import sys
 import threading
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List

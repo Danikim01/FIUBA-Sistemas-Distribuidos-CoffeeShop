@@ -27,21 +27,21 @@
   },
   "workers": {
     "year_filter": {
-      "count": 2,
+      "count": 3,
       "environment": {
         "INPUT_QUEUE": "transactions_raw",
         "OUTPUT_EXCHANGE": "transactions_year_filtered"
       }
     },
     "items_year_filter": {
-      "count": 2,
+      "count": 3,
       "environment": {
         "INPUT_QUEUE": "transaction_items_raw",
         "OUTPUT_QUEUE": "transaction_items_year_filtered"
       }
     },
     "time_filter": {
-      "count": 2,
+      "count": 3,
       "environment": {
         "INPUT_EXCHANGE": "transactions_year_filtered",
         "INPUT_QUEUE": "transactions_year_filtered_time",
@@ -49,7 +49,7 @@
       }
     },
     "amount_filter": {
-      "count": 2,
+      "count": 3,
       "environment": {
         "INPUT_EXCHANGE": "transactions_time_filtered",
         "INPUT_QUEUE": "transactions_time_filtered_amount",
@@ -57,7 +57,7 @@
       }
     },
     "tpv": {
-      "count": 2,
+      "count": 3,
       "environment": {
         "INPUT_EXCHANGE": "transactions_time_filtered",
         "INPUT_QUEUE": "transactions_time_filtered_tpv",
@@ -72,7 +72,7 @@
       }
     },
     "tpv_sharded": {
-      "count": 2,
+      "count": 3,
       "environment": {
         "INPUT_EXCHANGE": "transactions_time_filtered_tpv_sharded",
         "INPUT_QUEUE": "transactions_time_filtered_tpv_shard",
@@ -80,7 +80,7 @@
       }
     },
     "items_top": {
-      "count": 2,
+      "count": 3,
       "environment": {
         "INPUT_QUEUE": "transaction_items_year_filtered",
         "OUTPUT_QUEUE": "top_items_partial"
@@ -93,7 +93,7 @@
       }
     },
     "items_sharded": {
-      "count": 2,
+      "count": 3,
       "environment": {
         "INPUT_EXCHANGE": "transaction_items_year_filtered_sharded",
         "INPUT_QUEUE": "transaction_items_year_filtered_shard",
@@ -108,7 +108,7 @@
       }
     },
     "top_clients": {
-      "count": 2,
+      "count": 3,
       "environment": {
         "INPUT_EXCHANGE": "transactions_year_filtered_sharded",
         "INPUT_QUEUE": "transactions_year_filtered_shard",
