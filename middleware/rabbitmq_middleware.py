@@ -73,6 +73,11 @@ class _BaseRabbitMQMiddleware(MessageMiddleware):
         self._lock = threading.RLock()
         self._active_channel: Optional[pika.channel.Channel] = None
         self._active_connection: Optional[pika.BlockingConnection] = None
+        
+        # Thread-local storage for persistent send channels (one channel per thread)
+        # Pika channels are NOT thread-safe, so each thread must have its own channel
+        # This ensures message ordering per thread while maintaining thread safety
+        self._send_channel_local = threading.local()
 
         self._max_reconnect_attempts = max_reconnect_attempts
         self._base_retry_delay = base_retry_delay
@@ -99,6 +104,62 @@ class _BaseRabbitMQMiddleware(MessageMiddleware):
         with self._lock:
             self._active_channel = None
             self._active_connection = None
+    
+    def _get_or_create_send_channel(self) -> pika.channel.Channel:
+        """
+        Get or create a persistent channel for sending messages (thread-local).
+        Each thread gets its own channel to maintain message ordering per thread.
+        Thread-safe: uses thread-local storage (Pika channels are NOT thread-safe).
+        """
+        # Get thread-local channel
+        if not hasattr(self._send_channel_local, 'channel'):
+            # Create new channel for this thread
+            try:
+                connection = self._connection_manager.get_connection()
+                channel = connection.channel()
+                # Enable publisher confirms for reliability
+                with suppress(Exception):
+                    channel.confirm_delivery()
+                
+                self._send_channel_local.channel = channel
+                self._send_channel_local.connection = connection
+                logger.debug(f"Created new persistent send channel for thread {threading.current_thread().name}")
+            except Exception as e:
+                logger.error(f"Failed to create send channel: {e}")
+                raise
+        
+        # Check if existing channel is still valid
+        channel = self._send_channel_local.channel
+        connection = self._send_channel_local.connection
+        
+        if channel and channel.is_open and connection:
+            try:
+                # Test channel with a simple operation
+                connection.process_data_events(time_limit=0)
+                return channel
+            except Exception as e:
+                logger.warning(
+                    f"Send channel failed health check in thread {threading.current_thread().name}: {e}, recreating..."
+                )
+                self._close_send_channel()
+                # Recursively call to create new channel
+                return self._get_or_create_send_channel()
+        
+        # Channel is invalid, create new one
+        return self._get_or_create_send_channel()
+    
+    def _close_send_channel(self) -> None:
+        """Close the persistent send channel for current thread (thread-safe)."""
+        if hasattr(self._send_channel_local, 'channel'):
+            channel = self._send_channel_local.channel
+            if channel and channel.is_open:
+                try:
+                    channel.close()
+                except Exception:
+                    pass
+            delattr(self._send_channel_local, 'channel')
+            if hasattr(self._send_channel_local, 'connection'):
+                delattr(self._send_channel_local, 'connection')
 
     def _stop_consuming_threadsafe(self) -> None:
         with self._lock:
@@ -135,6 +196,8 @@ class _BaseRabbitMQMiddleware(MessageMiddleware):
 
         # Clear active channel before closing connection
         self._clear_active_channel()
+        # Close send channel
+        self._close_send_channel()
         self.consuming = False
 
         try:
@@ -285,20 +348,22 @@ class RabbitMQMiddlewareQueue(_BaseRabbitMQMiddleware):
             self._wait_before_retry(attempt - 1)
 
     def send(self, message: Any, routing_key: str = "", exchange: str = "") -> None:
+        """
+        Send a message using a persistent channel for ordering guarantees.
+        The channel is reused across all sends to maintain message order.
+        """
         payload = serialize_message(message).encode("utf-8")
         attempt = 0
 
         while True:
-            channel: Optional[pika.channel.Channel] = None
-
             try:
-                connection = self._connection_manager.get_connection()
-                channel = connection.channel()
+                # Get or create persistent send channel (thread-safe)
+                channel = self._get_or_create_send_channel()
+                
+                # Ensure queue is declared (idempotent operation)
                 self._declare_queue(channel)
 
-                with suppress(Exception):
-                    channel.confirm_delivery()
-
+                # Publish message using persistent channel
                 channel.basic_publish(
                     exchange=exchange if exchange else "",
                     routing_key=self.queue_name if not routing_key else routing_key,
@@ -311,14 +376,14 @@ class RabbitMQMiddlewareQueue(_BaseRabbitMQMiddleware):
                 return
             except pika.exceptions.NackError as exc:
                 raise MessageMiddlewareMessageError(f"Mensaje rechazado por RabbitMQ: {exc}") from exc
-            except pika.exceptions.AMQPConnectionError as exc:
-                logger.warning("Conexión perdida enviando a '%s': %s", self.queue_name, exc)
+            except (pika.exceptions.AMQPConnectionError, pika.exceptions.ChannelWrongStateError) as exc:
+                logger.warning("Conexión/canal perdido enviando a '%s': %s, recreando canal...", self.queue_name, exc)
+                # Close invalid channel and retry
+                self._close_send_channel()
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Error enviando mensaje a '%s': %s", self.queue_name, exc)
-            finally:
-                if channel and channel.is_open:
-                    with suppress(Exception):
-                        channel.close()
+                # Close channel on unexpected errors and retry
+                self._close_send_channel()
 
             attempt += 1
             if attempt > self._publish_retry_attempts:
@@ -522,24 +587,26 @@ class RabbitMQMiddlewareExchange(_BaseRabbitMQMiddleware):
             self._wait_before_retry(attempt - 1)
 
     def send(self, message: Any, routing_key: str = "", exchange: str = "") -> None:
+        """
+        Send a message using a persistent channel for ordering guarantees.
+        The channel is reused across all sends to maintain message order.
+        """
         payload = serialize_message(message).encode("utf-8")
         attempt = 0
 
         while True:
-            channel: Optional[pika.channel.Channel] = None
-
             try:
-                connection = self._connection_manager.get_connection()
-                channel = connection.channel()
+                # Get or create persistent send channel (thread-safe)
+                channel = self._get_or_create_send_channel()
+                
+                # Ensure exchange is declared (idempotent operation)
                 channel.exchange_declare(
                     exchange=self.exchange_name,
                     exchange_type=self.exchange_type,
                     durable=False,
                 )
 
-                with suppress(Exception):
-                    channel.confirm_delivery()
-
+                # Determine routing key
                 effective_routing_key = routing_key
                 if not effective_routing_key:
                     if self.exchange_type == "fanout":
@@ -547,6 +614,7 @@ class RabbitMQMiddlewareExchange(_BaseRabbitMQMiddleware):
                     elif self.route_keys:
                         effective_routing_key = self.route_keys[0]
 
+                # Publish message using persistent channel
                 channel.basic_publish(
                     exchange=self.exchange_name,
                     routing_key=effective_routing_key,
@@ -559,14 +627,14 @@ class RabbitMQMiddlewareExchange(_BaseRabbitMQMiddleware):
                 return
             except pika.exceptions.NackError as exc:
                 raise MessageMiddlewareMessageError(f"Mensaje rechazado por RabbitMQ: {exc}") from exc
-            except pika.exceptions.AMQPConnectionError as exc:
-                logger.warning("Conexión perdida enviando a '%s': %s", self.exchange_name, exc)
+            except (pika.exceptions.AMQPConnectionError, pika.exceptions.ChannelWrongStateError) as exc:
+                logger.warning("Conexión/canal perdido enviando a '%s': %s, recreando canal...", self.exchange_name, exc)
+                # Close invalid channel and retry
+                self._close_send_channel()
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Error enviando mensaje a '%s': %s", self.exchange_name, exc)
-            finally:
-                if channel and channel.is_open:
-                    with suppress(Exception):
-                        channel.close()
+                # Close channel on unexpected errors and retry
+                self._close_send_channel()
 
             attempt += 1
             if attempt > self._max_reconnect_attempts:
