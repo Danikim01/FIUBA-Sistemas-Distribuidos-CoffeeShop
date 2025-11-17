@@ -166,7 +166,7 @@ class BaseWorker(ABC):
                 finally:
                     self._current_message_metadata = None
 
-            self.eof_handler.start_consuming(on_message)
+            #self.eof_handler.start_consuming(on_message)
             self.middleware_config.input_middleware.start_consuming(on_message)
 
         except KeyboardInterrupt:

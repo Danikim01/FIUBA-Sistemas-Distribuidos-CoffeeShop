@@ -5,8 +5,10 @@ set -euo pipefail
 COMPOSE_CMD=${COMPOSE_CMD:-"docker compose"}
 KILL_INTERVAL=5      # seconds between kills
 KILL_COUNT=0         # 0 => infinite
-WORKER_PATTERNS=("*-worker-*")
-
+WORKER_PATTERNS=("*-filter-worker-*")
+# sharded = "*-worker-sharded-*", 
+# filter = "*-filter-worker-*"
+# sharded and filter = "*-worker-*"
 get_all_services() {
   $COMPOSE_CMD ps --services
 }

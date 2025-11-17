@@ -16,13 +16,18 @@ class GatewayConfig:
         self.rabbitmq_port = int(os.getenv('RABBITMQ_PORT', 5672))
         
         # Queue names
-        self.transactions_queue_name = os.getenv('OUTPUT_QUEUE', 'transactions_raw')
         self.stores_exchange_name = os.getenv('STORES_EXCHANGE', 'stores_raw')
         self.users_queue_name = os.getenv('USERS_QUEUE', 'users_raw')
         self.transaction_items_queue_name = os.getenv('TRANSACTION_ITEMS_QUEUE', 'transaction_items_raw')
         self.menu_items_queue_name = os.getenv('MENU_ITEMS_QUEUE', 'menu_items_raw')
         self.results_queue_name = os.getenv('RESULTS_QUEUE', 'gateway_results')
         
+        # Exchanges names
+        self.transactions_exchange_name = os.getenv('TRANSACTIONS_EXCHANGE', 'transactions_sharded')
+        self.transaction_items_exchange_name = os.getenv('TRANSACTION_ITEMS_EXCHANGE', 'transaction_items_sharded')
+        
+        self.filter_replica_count = int(os.getenv('FILTER_REPLICA_COUNT', '3'))
+
         # Processing configuration
         self.chunk_size = int(os.getenv('CHUNK_SIZE', 100))
 

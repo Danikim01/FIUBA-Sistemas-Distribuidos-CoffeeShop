@@ -36,37 +36,101 @@ class WorkerConfig:
 
 
 WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
+    "year_filter_sharding_router": {
+        "display_name": "Year Filter Sharding Router",
+        "base_service_name": "year-filter-sharding-router",
+        "command": ["python", "sharding/sharding_router.py"],
+        "needs_worker_id": False,
+        "required_environment": ["INPUT_QUEUE", "OUTPUT_EXCHANGE", "NUM_SHARDS"],
+        "scalable": False,
+    },
     "year_filter": {
         "display_name": "Year Filter Workers",
         "base_service_name": "year-filter-worker",
         "command": ["python", "filter/year.py"],
         "needs_worker_id": True,
-        "required_environment": ["INPUT_QUEUE", "OUTPUT_EXCHANGE"],
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE", "IS_SHARDED_WORKER"],
         "scalable": True,
+    },
+    "year_filter_aggregator": {
+        "display_name": "Year Filter Aggregator",
+        "base_service_name": "year-filter-aggregator",
+        "command": ["python", "router/filter_aggregator.py"],
+        "needs_worker_id": False,
+        "required_environment": ["INPUT_QUEUE", "OUTPUT_EXCHANGE", "REPLICA_COUNT"],
+        "scalable": False,
+    },
+    "items_year_filter_sharding_router": {
+        "display_name": "Items Year Filter Sharding Router",
+        "base_service_name": "items-year-filter-sharding-router",
+        "command": ["python", "sharding/items_sharding_router.py"],
+        "needs_worker_id": False,
+        "required_environment": ["INPUT_QUEUE", "OUTPUT_EXCHANGE", "NUM_SHARDS"],
+        "scalable": False,
     },
     "items_year_filter": {
         "display_name": "Items Year Filter Workers",
         "base_service_name": "items-year-filter-worker",
         "command": ["python", "filter/year.py"],
         "needs_worker_id": True,
-        "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE", "IS_SHARDED_WORKER"],
         "scalable": True,
+    },
+    "items_year_filter_aggregator": {
+        "display_name": "Items Year Filter Aggregator",
+        "base_service_name": "items-year-filter-aggregator",
+        "command": ["python", "router/filter_aggregator.py"],
+        "needs_worker_id": False,
+        "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE", "REPLICA_COUNT"],
+        "scalable": False,
+    },
+    "time_filter_sharding_router": {
+        "display_name": "Time Filter Sharding Router",
+        "base_service_name": "time-filter-sharding-router",
+        "command": ["python", "sharding/sharding_router.py"],
+        "needs_worker_id": False,
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_EXCHANGE", "NUM_SHARDS"],
+        "scalable": False,
     },
     "time_filter": {
         "display_name": "Time Filter Workers",
         "base_service_name": "time-filter-worker",
         "command": ["python", "filter/time.py"],
         "needs_worker_id": True,
-        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_EXCHANGE"],
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE", "IS_SHARDED_WORKER"],
         "scalable": True,
+    },
+    "time_filter_aggregator": {
+        "display_name": "Time Filter Aggregator",
+        "base_service_name": "time-filter-aggregator",
+        "command": ["python", "router/filter_aggregator.py"],
+        "needs_worker_id": False,
+        "required_environment": ["INPUT_QUEUE", "OUTPUT_EXCHANGE", "REPLICA_COUNT"],
+        "scalable": False,
+    },
+    "amount_filter_sharding_router": {
+        "display_name": "Amount Filter Sharding Router",
+        "base_service_name": "amount-filter-sharding-router",
+        "command": ["python", "sharding/sharding_router.py"],
+        "needs_worker_id": False,
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_EXCHANGE", "NUM_SHARDS"],
+        "scalable": False,
     },
     "amount_filter": {
         "display_name": "Amount Filter Workers",
         "base_service_name": "amount-filter-worker",
         "command": ["python", "filter/amount.py"],
         "needs_worker_id": True,
-        "required_environment": ["INPUT_EXCHANGE", "OUTPUT_QUEUE"],
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE", "IS_SHARDED_WORKER"],
         "scalable": True,
+    },
+    "amount_filter_aggregator": {
+        "display_name": "Amount Filter Aggregator",
+        "base_service_name": "amount-filter-aggregator",
+        "command": ["python", "router/filter_aggregator.py"],
+        "needs_worker_id": False,
+        "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE", "REPLICA_COUNT"],
+        "scalable": False,
     },
     "tpv": {
         "display_name": "TPV Workers",
@@ -170,6 +234,10 @@ SHARDED_WORKER_KEYS = {
     "tpv_sharded",
     "items_sharded",
     "top_clients",
+    "year_filter",
+    "items_year_filter",
+    "time_filter",
+    "amount_filter",
 }
 
 
@@ -177,6 +245,10 @@ ROUTER_TO_SHARDED: Dict[str, str] = {
     "tpv_sharding_router": "tpv_sharded",
     "items_sharding_router": "items_sharded",
     "top_clients_sharding_router": "top_clients",
+    "year_filter_sharding_router": "year_filter",
+    "items_year_filter_sharding_router": "items_year_filter",
+    "time_filter_sharding_router": "time_filter",
+    "amount_filter_sharding_router": "amount_filter",
 }
 
 # Map aggregators to their corresponding sharded workers
@@ -185,6 +257,10 @@ AGGREGATOR_TO_SHARDED: Dict[str, str] = {
     "tpv_aggregator": "tpv_sharded",
     "items_aggregator": "items_sharded",
     "top_clients_birthdays": "top_clients",
+    "year_filter_aggregator": "year_filter",
+    "items_year_filter_aggregator": "items_year_filter",
+    "time_filter_aggregator": "time_filter",
+    "amount_filter_aggregator": "amount_filter",
 }
 
 
@@ -484,6 +560,10 @@ def generate_worker_sections(
         # Always skip items_top when items_sharded exists (always use sharding)
         if key == "items_top" and "items_sharded" in workers:
             continue
+        
+        # Skip sharding routers for year_filter and items_year_filter because gateway does the sharding
+        if key in ["year_filter_sharding_router", "items_year_filter_sharding_router"]:
+            continue
             
         # Note: top_clients is already the sharded version, so we don't skip it
         total_count = worker_cfg.count
@@ -535,6 +615,21 @@ def generate_worker_sections(
                 # This ensures the aggregator waits for EOFs from all sharded workers
                 environment["REPLICA_COUNT"] = str(sharded_counts[sharded_key])
 
+            # Special handling for stateless filter workers - enable EOF coordination
+            if key in ["amount_filter", "year_filter", "items_year_filter", "time_filter"]:
+                environment["USE_EOF_COORDINATION"] = "True"
+                # Set coordination group key based on worker type
+                coordination_group_keys = {
+                    "year_filter": "year_filter_worker_coordination",
+                    "items_year_filter": "items_year_filter_worker_coordination",
+                    "time_filter": "time_filter_worker_coordination",
+                    "amount_filter": "amount_filter_worker_coordination",
+                }
+                if key in coordination_group_keys:
+                    environment["COORDINATION_GROUP_KEY"] = coordination_group_keys[key]
+                # Set BATCH_SIZE=5000 for filter workers
+                environment["BATCH_SIZE"] = "5000"
+            
             # Special handling for sharded workers - fix queue names and add sharded flag
             # Check both by base_service_name and by key to ensure all sharded workers are detected
             if "sharded" in meta["base_service_name"] or key in SHARDED_WORKER_KEYS:
@@ -555,7 +650,7 @@ def generate_worker_sections(
             if meta["needs_worker_id"]:
                 # For sharded workers, use 0-based indexing (0, 1, 2, ...)
                 # For regular workers, use 1-based indexing (1, 2, 3, ...)
-                if "sharded" in meta["base_service_name"] or "top_clients" in key:
+                if "sharded" in meta["base_service_name"] or key in SHARDED_WORKER_KEYS:
                     environment["WORKER_ID"] = str(index - 1)  # 0-based for sharded workers
                 else:
                     environment["WORKER_ID"] = str(index)  # 1-based for regular workers
@@ -644,6 +739,10 @@ def generate_healthchecker_section(
             continue
         # Always skip items_top when items_sharded exists (always use sharding)
         if key == "items_top" and "items_sharded" in workers:
+            continue
+        
+        # Skip sharding routers for year_filter and items_year_filter because gateway does the sharding
+        if key in ["year_filter_sharding_router", "items_year_filter_sharding_router"]:
             continue
         
         total_count = worker_cfg.count

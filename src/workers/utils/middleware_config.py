@@ -84,12 +84,12 @@ class MiddlewareConfig:
             prefetch_count=prefetch_count or self.prefetch_count
         )
     
-    def create_eof_requeue(self) -> RabbitMQMiddlewareQueue:
-        name = self.input_queue + '_eof_requeue'
-        if self.is_sharded_worker:
-            name = self.input_exchange + '_eof_requeue_sharded'
-        logger.info(f"[DEBUG] Worker {os.getenv('WORKER_ID', '0')} creating EOF requeue queue: {name}")
-        return self.create_queue(name, 1)
+    # def create_eof_requeue(self) -> RabbitMQMiddlewareQueue:
+    #     name = self.input_queue + '_eof_requeue'
+    #     if self.is_sharded_worker:
+    #         name = self.input_exchange + '_eof_requeue_sharded'
+    #     logger.info(f"[DEBUG] Worker {os.getenv('WORKER_ID', '0')} creating EOF requeue queue: {name}")
+    #     return self.create_queue(name, 1)
 
     def get_input_target(self) -> str:
         if self.has_input_exchange():

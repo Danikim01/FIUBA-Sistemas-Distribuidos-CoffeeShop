@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from abc import abstractmethod
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 
 from workers.base_worker import BaseWorker
 from workers.utils.processed_message_store import ProcessedMessageStore
@@ -19,7 +19,8 @@ class FilterWorker(BaseWorker):
     def __init__(self) -> None:
         super().__init__()
         worker_label = f"{self.__class__.__name__}-{os.getenv('WORKER_ID', '0')}"
-        self._processed_store = ProcessedMessageStore(worker_label)
+        self._processed_store = ProcessedMessageStore(worker_label)  
+
 
     @abstractmethod
     def apply_filter(self, item: Any) -> bool:
@@ -91,6 +92,15 @@ class FilterWorker(BaseWorker):
             self._mark_processed(client_id, message_uuid)
 
     def handle_eof(self, message: dict, client_id: str):
-        """Clear processed state when EOF is received and propagate downstream."""
+        """
+        Clear processed state and send EOF to filter aggregator.
+        
+        The aggregator will count EOFs from all replicas and propagate when complete.
+        """
         self._processed_store.clear_client(client_id)
-        return super().handle_eof(message, client_id)
+        
+        # Send EOF to filter aggregator
+        #self.send_message(client_id=client_id, data=None, message_type='EOF')
+        self.eof_handler.output_eof(client_id=client_id)
+        logger.info(f"\033[36m[FILTER] EOF sent to aggregator for client {client_id}\033[0m")
+        

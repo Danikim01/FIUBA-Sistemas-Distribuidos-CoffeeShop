@@ -47,12 +47,13 @@ class EOFHandler:
 
         counter = self.get_counter(message)
 
-        if self.should_output(counter):
-            logger.info(f"Worker {self.worker_id}: Outputting EOF for client {client_id} with counter {counter}")
-            self.output_eof(client_id=client_id)
-        else:
-            logger.info(f"Worker {self.worker_id}: Requeuing EOF for client {client_id} with counter {counter}")
-            self.requeue_eof(client_id=client_id, counter=counter)
+        # if self.should_output(counter):
+        #     logger.info(f"Worker {self.worker_id}: Outputting EOF for client {client_id} with counter {counter}")
+        #     self.output_eof(client_id=client_id)
+        # else:
+        #     logger.info(f"Worker {self.worker_id}: Requeuing EOF for client {client_id} with counter {counter}")
+        #     self.requeue_eof(client_id=client_id, counter=counter)
+        self.output_eof(client_id=client_id)
 
     def handle_eof_with_routing_key(self, message: Dict[str, Any], client_id: ClientId, routing_key: str = "", exchange: str = ""):
         """Handle EOF message with specific routing key.
@@ -66,12 +67,13 @@ class EOFHandler:
 
         counter = self.get_counter(message)
 
-        if self.should_output(counter):
-            logger.info(f"Worker {self.worker_id}: Outputting EOF for client {client_id} with counter {counter}")
-            self.output_eof_with_routing_key(client_id=client_id, routing_key=routing_key, exchange=exchange)
-        else:
-            logger.info(f"Worker {self.worker_id}: Requeuing EOF for client {client_id} with counter {counter}")
-            self.requeue_eof(client_id=client_id, counter=counter)
+        # if self.should_output(counter):
+        #     logger.info(f"Worker {self.worker_id}: Outputting EOF for client {client_id} with counter {counter}")
+        #     self.output_eof_with_routing_key(client_id=client_id, routing_key=routing_key, exchange=exchange)
+        # else:
+        #     logger.info(f"Worker {self.worker_id}: Requeuing EOF for client {client_id} with counter {counter}")
+        #     self.requeue_eof(client_id=client_id, counter=counter)
+        self.output_eof_with_routing_key(client_id=client_id, routing_key=routing_key, exchange=exchange)
 
     def get_counter(self, message: Dict[str, Any]) -> Counter:
         """Extract the counter from the EOF message.
@@ -157,36 +159,36 @@ class EOFHandler:
                 self._output_publishers.append(publisher)
         return publisher
 
-    def _get_requeue_publisher(self) -> RabbitMQMiddlewareQueue:
-        publisher = getattr(self._thread_local, "requeue_publisher", None)
-        if publisher is None:
-            publisher = self.middleware_config.create_eof_requeue()
-            setattr(self._thread_local, "requeue_publisher", publisher)
-            with self._publishers_lock:
-                self._requeue_publishers.append(publisher)
-        return publisher
+    # def _get_requeue_publisher(self) -> RabbitMQMiddlewareQueue:
+    #     publisher = getattr(self._thread_local, "requeue_publisher", None)
+    #     if publisher is None:
+    #         publisher = self.middleware_config.create_eof_requeue()
+    #         setattr(self._thread_local, "requeue_publisher", publisher)
+    #         with self._publishers_lock:
+    #             self._requeue_publishers.append(publisher)
+    #     return publisher
 
-    def start_consuming(self, on_message):
-        """Start the consuming thread."""
-        # Sharded workers don't consume from EOF requeue queue. Only create and consume from EOF requeue queue if NOT a sharded worker
-        if self.is_sharded_worker:
-            logger.info(f"Worker {self.worker_id} is a sharded worker - skipping EOF requeue queue")
-            return
+    # def start_consuming(self, on_message):
+    #     """Start the consuming thread."""
+    #     # Sharded workers don't consume from EOF requeue queue. Only create and consume from EOF requeue queue if NOT a sharded worker
+    #     if self.is_sharded_worker:
+    #         logger.info(f"Worker {self.worker_id} is a sharded worker - skipping EOF requeue queue")
+    #         return
         
-        def _start_consuming():
-            try:
-                if self.eof_consumer is None:
-                    self.eof_consumer = self.middleware_config.create_eof_requeue()
-                logger.info(f"[DEBUG] Worker {self.worker_id} starting EOF consumer for queue: {self.eof_consumer.queue_name}")
-                self.eof_consumer.start_consuming(on_message)
-            except Exception as exc:  # noqa: BLE001
-                logger.error("Error consuming EOF messages: %s", exc)
-            finally:
-                self.consuming_thread = None
-        if not self.consuming_thread or not self.consuming_thread.is_alive():
-            logger.info(f"[DEBUG] Starting EOF handler consuming thread for worker {self.worker_id}")
-            self.consuming_thread = threading.Thread(target=_start_consuming, daemon=True)
-            self.consuming_thread.start()
+    #     def _start_consuming():
+    #         try:
+    #             if self.eof_consumer is None:
+    #                 self.eof_consumer = self.middleware_config.create_eof_requeue()
+    #             logger.info(f"[DEBUG] Worker {self.worker_id} starting EOF consumer for queue: {self.eof_consumer.queue_name}")
+    #             self.eof_consumer.start_consuming(on_message)
+    #         except Exception as exc:  # noqa: BLE001
+    #             logger.error("Error consuming EOF messages: %s", exc)
+    #         finally:
+    #             self.consuming_thread = None
+    #     if not self.consuming_thread or not self.consuming_thread.is_alive():
+    #         logger.info(f"[DEBUG] Starting EOF handler consuming thread for worker {self.worker_id}")
+    #         self.consuming_thread = threading.Thread(target=_start_consuming, daemon=True)
+    #         self.consuming_thread.start()
 
     def cleanup(self) -> None:
         try:

@@ -8,6 +8,12 @@ from contextlib import suppress
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue
 from middleware.thread_aware_publishers import ThreadAwareExchangePublisher, ThreadAwareQueuePublisher
 from config import GatewayConfig
+from workers.utils.sharding_utils import (
+    get_routing_key,
+    get_routing_key_for_item,
+    extract_store_id_from_payload,
+    extract_item_id_from_payload
+)
 
 logger = logging.getLogger(__name__)
 
@@ -112,21 +118,26 @@ class QueueManager:
         self._init_queues()
         
         logger.info(f"Queue manager configured with RabbitMQ: {config.rabbitmq_host}:{config.rabbitmq_port}")
-        logger.info(f"Transactions queue: {config.transactions_queue_name}")
-        logger.info("Stores queues: %s", config.stores_exchange_name)
+        logger.info(f"Transactions exchange: {config.transactions_exchange_name} (sharded by store_id)")
+        logger.info("Stores exchange: %s", config.stores_exchange_name)
         logger.info(f"Users queue: {config.users_queue_name}")
-        logger.info(f"Transaction items queue: {config.transaction_items_queue_name}")
+        logger.info(f"Transaction items exchange: {config.transaction_items_exchange_name} (sharded by item_id)")
         logger.info(f"Menu items queue: {config.menu_items_queue_name}")
         logger.info(f"Results queue: {config.results_queue_name}")
+        logger.info(f"Filter replica count: {config.filter_replica_count}")
     
     def _init_queues(self):
         """Initialize all RabbitMQ queue connections."""
         connection_params = self.config.get_rabbitmq_connection_params()
         
-        # Transactions queue publisher per thread
-        self.transactions_queue = ThreadAwareQueuePublisher(
-            lambda: RabbitMQMiddlewareQueue(
-                queue_name=self.config.transactions_queue_name,
+        # Transactions exchange publisher per thread (with sharding support)
+        replica_count = self.config.filter_replica_count
+        transaction_route_keys = [f"shard_{i}" for i in range(replica_count)]
+        self.transactions_exchange = ThreadAwareExchangePublisher(
+            lambda: RabbitMQMiddlewareExchange(
+                exchange_name=self.config.transactions_exchange_name,
+                exchange_type='direct',
+                route_keys=transaction_route_keys,
                 **connection_params,
             )
         )
@@ -149,10 +160,13 @@ class QueueManager:
             )
         )
         
-        # Transaction items queue publisher per thread
-        self.transaction_items_queue = ThreadAwareQueuePublisher(
-            lambda: RabbitMQMiddlewareQueue(
-                queue_name=self.config.transaction_items_queue_name,
+        # Transaction items exchange publisher per thread (with sharding support)
+        transaction_items_route_keys = [f"shard_{i}" for i in range(replica_count)]
+        self.transaction_items_exchange = ThreadAwareExchangePublisher(
+            lambda: RabbitMQMiddlewareExchange(
+                exchange_name=self.config.transaction_items_exchange_name,
+                exchange_type='direct',
+                route_keys=transaction_items_route_keys,
                 **connection_params,
             )
         )
@@ -174,20 +188,52 @@ class QueueManager:
         )
     
     def send_transactions_chunks(self, transactions: List[Any], client_id: str) -> None:
-        """Send transactions in chunks to the processing queue with client metadata."""
+        """Send transactions in chunks to the sharded exchange with client metadata.
+        
+        Each transaction is sharded by store_id to ensure consistent routing.
+        """
         chunks = self._create_chunks(transactions, self.config.chunk_size)
         logger.debug(f"Creating {len(chunks)} chunks of transactions for client {client_id}")
         
         try:
+            replica_count = self.config.filter_replica_count
+            
             for i, chunk in enumerate(chunks):
-                message_with_metadata = {
-                    'client_id': client_id,
-                    'data': chunk,
-                    'chunk_index': i,
-                    'total_chunks': len(chunks)
-                }
-                self.transactions_queue.send(message_with_metadata)
-                logger.debug(f"Sent chunk {i+1}/{len(chunks)} with {len(chunk)} transactions for client {client_id}")
+                # Shard transactions within chunk by store_id
+                sharded_chunks = {}
+                for transaction in chunk:
+                    if isinstance(transaction, dict):
+                        store_id = extract_store_id_from_payload(transaction)
+                        if store_id is not None:
+                            routing_key = get_routing_key(store_id, replica_count)
+                            if routing_key not in sharded_chunks:
+                                sharded_chunks[routing_key] = []
+                            sharded_chunks[routing_key].append(transaction)
+                        else:
+                            # Fallback: distribute to shard_0 if no store_id
+                            logger.warning(f"Transaction without store_id, routing to shard_0")
+                            if 'shard_0' not in sharded_chunks:
+                                sharded_chunks['shard_0'] = []
+                            sharded_chunks['shard_0'].append(transaction)
+                    else:
+                        # Fallback for non-dict transactions
+                        if 'shard_0' not in sharded_chunks:
+                            sharded_chunks['shard_0'] = []
+                        sharded_chunks['shard_0'].append(transaction)
+                
+                # Send each sharded chunk to its routing key
+                for routing_key, sharded_chunk in sharded_chunks.items():
+                    message_with_metadata = {
+                        'client_id': client_id,
+                        'data': sharded_chunk,
+                        'chunk_index': i,
+                        'total_chunks': len(chunks)
+                    }
+                    self.transactions_exchange.send(message_with_metadata, routing_key=routing_key)
+                    logger.debug(
+                        f"Sent chunk {i+1}/{len(chunks)} with {len(sharded_chunk)} transactions "
+                        f"to {routing_key} for client {client_id}"
+                    )
             
             logger.debug(f"Sent {len(chunks)} chunks with {len(transactions)} total transactions for client {client_id}")
         except Exception as e:
@@ -225,7 +271,10 @@ class QueueManager:
             raise
     
     def send_transaction_items_chunks(self, transaction_items: List[Any], client_id: str) -> None:
-        """Send transaction items in chunks to the processing queue with client metadata."""
+        """Send transaction items in chunks to the sharded exchange with client metadata.
+        
+        Each transaction item is sharded by item_id to ensure consistent routing.
+        """
         logger.debug(
             "Processing %s transaction items with chunking (chunk_size=%s) for client %s",
             len(transaction_items),
@@ -236,22 +285,48 @@ class QueueManager:
         try:
             chunks = self._create_chunks(transaction_items, self.config.chunk_size)
             logger.debug("Creating %s chunks of transaction items for client %s", len(chunks), client_id)
+            replica_count = self.config.filter_replica_count
 
             for i, chunk in enumerate(chunks):
-                message_with_metadata = {
-                    'client_id': client_id,
-                    'data': chunk,
-                    'chunk_index': i,
-                    'total_chunks': len(chunks)
-                }
-                self.transaction_items_queue.send(message_with_metadata)
-                logger.debug(
-                    "Sent chunk %s/%s with %s transaction items for client %s",
-                    i + 1,
-                    len(chunks),
-                    len(chunk),
-                    client_id
-                )
+                # Shard transaction items within chunk by item_id
+                sharded_chunks = {}
+                for item in chunk:
+                    if isinstance(item, dict):
+                        item_id = extract_item_id_from_payload(item)
+                        if item_id is not None:
+                            routing_key = get_routing_key_for_item(item_id, replica_count)
+                            if routing_key not in sharded_chunks:
+                                sharded_chunks[routing_key] = []
+                            sharded_chunks[routing_key].append(item)
+                        else:
+                            # Fallback: distribute to shard_0 if no item_id
+                            logger.warning(f"Transaction item without item_id, routing to shard_0")
+                            if 'shard_0' not in sharded_chunks:
+                                sharded_chunks['shard_0'] = []
+                            sharded_chunks['shard_0'].append(item)
+                    else:
+                        # Fallback for non-dict items
+                        if 'shard_0' not in sharded_chunks:
+                            sharded_chunks['shard_0'] = []
+                        sharded_chunks['shard_0'].append(item)
+                
+                # Send each sharded chunk to its routing key
+                for routing_key, sharded_chunk in sharded_chunks.items():
+                    message_with_metadata = {
+                        'client_id': client_id,
+                        'data': sharded_chunk,
+                        'chunk_index': i,
+                        'total_chunks': len(chunks)
+                    }
+                    self.transaction_items_exchange.send(message_with_metadata, routing_key=routing_key)
+                    logger.debug(
+                        "Sent chunk %s/%s with %s transaction items to %s for client %s",
+                        i + 1,
+                        len(chunks),
+                        len(sharded_chunk),
+                        routing_key,
+                        client_id
+                    )
         except Exception as e:
             logger.error(f"Error sending transaction items to RabbitMQ for client {client_id}: {e}")
             raise
@@ -272,17 +347,27 @@ class QueueManager:
             raise
     
     def propagate_transactions_eof(self, client_id: str) -> None:
-        """Propagate EOF message to transactions processing pipeline with client metadata."""
+        """Propagate EOF message to transactions processing pipeline with client metadata.
+        
+        Sends EOF to each routing key (shard_0, shard_1, shard_2) so each filter worker receives one.
+        """
         try:
+            replica_count = self.config.filter_replica_count
             eof_message = {
                 'client_id': client_id,
                 'type': 'EOF',
                 'data_type': 'TRANSACTIONS'
             }
-            self.transactions_queue.send(eof_message)
-            logger.info("Propagated EOF to transactions pipeline for client %s", client_id)
+            # Send EOF to each routing key (one per replica)
+            for i in range(replica_count):
+                routing_key = f"shard_{i}"
+                self.transactions_exchange.send(eof_message, routing_key=routing_key)
+            logger.info(
+                "Propagated %d EOFs to transactions exchange for client %s (one per routing key)",
+                replica_count, client_id
+            )
         except Exception as exc:
-            logger.error(f"Failed to propagate EOF to transactions queue for client {client_id}: {exc}")
+            logger.error(f"Failed to propagate EOF to transactions exchange for client {client_id}: {exc}")
             raise
     
     def propagate_users_eof(self, client_id: str) -> None:
@@ -313,17 +398,27 @@ class QueueManager:
             logger.error("Failed to propagate EOF to stores exchange %s for client %s: %s", self.config.stores_exchange_name, client_id, exc)
     
     def propagate_transaction_items_eof(self, client_id: str) -> None:
-        """Propagate EOF message to transaction items queue with client metadata."""
+        """Propagate EOF message to transaction items exchange with client metadata.
+        
+        Sends EOF to each routing key (shard_0, shard_1, shard_2) so each filter worker receives one.
+        """
         try:
+            replica_count = self.config.filter_replica_count
             eof_message = {
                 'client_id': client_id,
                 'type': 'EOF',
                 'data_type': 'TRANSACTION_ITEMS'
             }
-            self.transaction_items_queue.send(eof_message)
-            logger.info("Propagated EOF to transaction items queue for client %s", client_id)
+            # Send EOF to each routing key (one per replica)
+            for i in range(replica_count):
+                routing_key = f"shard_{i}"
+                self.transaction_items_exchange.send(eof_message, routing_key=routing_key)
+            logger.info(
+                "Propagated %d EOFs to transaction items exchange for client %s (one per routing key)",
+                replica_count, client_id
+            )
         except Exception as exc:
-            logger.error(f"Failed to propagate EOF to transaction items queue for client {client_id}: {exc}")
+            logger.error(f"Failed to propagate EOF to transaction items exchange for client {client_id}: {exc}")
             raise
     
     def iter_client_results(self, client_id: str):
@@ -347,9 +442,9 @@ class QueueManager:
     def close(self) -> None:
         """Close all RabbitMQ publishers created by the manager."""
         publishers = [
-            self.transactions_queue,
+            self.transactions_exchange,
             self.users_queue,
-            self.transaction_items_queue,
+            self.transaction_items_exchange,
             self.menu_items_queue,
             self.stores_exchange,
         ]

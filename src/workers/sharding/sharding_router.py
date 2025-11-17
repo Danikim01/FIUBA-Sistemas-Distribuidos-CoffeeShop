@@ -127,7 +127,10 @@ class ShardingRouter(BaseWorker):
             message: EOF message
             client_id: Client identifier
         """
-        logger.info(f"Received EOF for client {client_id}, flushing all remaining batches per shard")
+        logger.info(
+            f"\033[36m[SHARDING-ROUTER] Received EOF for client {client_id}, "
+            f"flushing all remaining batches per shard\033[0m"
+        )
         
         with self._pause_message_processing():
             # Collect all remaining batches to flush, grouped by shard
@@ -142,14 +145,16 @@ class ShardingRouter(BaseWorker):
             
             # Send all batches first (synchronously), grouped by shard
             # We do this outside the lock to avoid holding it during I/O
-            for routing_key, batch in batches_by_shard.items():
-                logger.info(f"Flushing final batch for client {client_id}, shard {routing_key}, size: {len(batch)}")
-                self.send_message(
-                    client_id,
-                    batch,
-                    routing_key=routing_key,
-                    message_uuid=str(uuid.uuid4()),
-                )
+            batches_items = batches_by_shard.items()
+            if len(batches_items) > 0:
+                for routing_key, batch in batches_items:
+                    logger.info(f"Flushing final batch for client {client_id}, shard {routing_key}, size: {len(batch)}")
+                    self.send_message(
+                        client_id,
+                        batch,
+                        routing_key=routing_key,
+                        message_uuid=str(uuid.uuid4()),
+                    )
             
             # Clean up client data after all batches are sent
             with self.batch_lock:
@@ -159,19 +164,39 @@ class ShardingRouter(BaseWorker):
             # Only after all batches are sent, send EOF to each shard
             # Send EOF to all shards (even if they didn't receive batches) to ensure
             # all sharded workers know the stream has ended
-            logger.info(f"All batches flushed for client {client_id}. Now propagating EOF to all {self.num_shards} shards")
+            logger.info(
+                f"\033[36m[SHARDING-ROUTER] All batches flushed for client {client_id}. "
+                f"Now propagating EOF to all {self.num_shards} shards\033[0m"
+            )
             
             for shard_id in range(self.num_shards):
                 routing_key = f"shard_{shard_id}"
-                logger.info(f"Sending EOF to shard {routing_key} for client {client_id}")
-                self.eof_handler.handle_eof_with_routing_key(
-                    client_id=client_id,
-                    message=message,
-                    routing_key=routing_key,
-                    exchange=self.middleware_config.output_exchange,
+                logger.info(
+                    f"\033[36m[SHARDING-ROUTER] Sending EOF to shard {routing_key} for client {client_id}\033[0m"
                 )
+                try:
+                    # Send EOF directly to each routing key (no coordination needed for sharding router)
+                    self.eof_handler.handle_eof_with_routing_key(client_id=client_id, routing_key=routing_key, message=message,exchange=self.middleware_config.output_exchange)
+                    # self.send_message(
+                    #     client_id=client_id,
+                    #     data=None,
+                    #     message_type='EOF',
+                    #     routing_key=routing_key
+                    # )
+                    logger.debug(
+                        f"[SHARDING-ROUTER] EOF sent successfully to {routing_key} for client {client_id}"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"\033[31m[SHARDING-ROUTER] Failed to send EOF to {routing_key} for client {client_id}: {e}\033[0m",
+                        exc_info=True
+                    )
+                    raise
             
-            logger.info(f"EOF propagation completed for client {client_id} to all {self.num_shards} shards")
+            logger.info(
+                f"\033[32m[SHARDING-ROUTER] EOF propagation completed for client {client_id} "
+                f"to all {self.num_shards} shards\033[0m"
+            )
     
     def cleanup(self) -> None:
         """

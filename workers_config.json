@@ -6,13 +6,14 @@
   },
   "service_environment": {
     "gateway": {
-      "OUTPUT_QUEUE": "transactions_raw",
+      "TRANSACTIONS_EXCHANGE": "transactions_sharded",
+      "TRANSACTION_ITEMS_EXCHANGE": "transaction_items_sharded",
       "RESULTS_QUEUE": "gateway_results",
       "STORES_EXCHANGE": "stores_raw",
       "USERS_QUEUE": "users_raw",
-      "TRANSACTION_ITEMS_QUEUE": "transaction_items_raw",
       "MENU_ITEMS_QUEUE": "menu_items_raw",
-      "CHUNK_SIZE": 5000
+      "CHUNK_SIZE": 5000,
+      "FILTER_REPLICA_COUNT": "3"
     },
     "client": {
       "count": 2,
@@ -26,34 +27,98 @@
     }
   },
   "workers": {
+    "year_filter_sharding_router": {
+      "environment": {
+        "INPUT_QUEUE": "transactions_raw",
+        "OUTPUT_EXCHANGE": "transactions_sharded",
+        "NUM_SHARDS": "3"
+      }
+    },
     "year_filter": {
       "count": 3,
       "environment": {
-        "INPUT_QUEUE": "transactions_raw",
-        "OUTPUT_EXCHANGE": "transactions_year_filtered"
+        "INPUT_EXCHANGE": "transactions_sharded",
+        "INPUT_QUEUE": "transactions_year_filtered_shard",
+        "OUTPUT_QUEUE": "transactions_year_filtered_aggregator_input",
+        "IS_SHARDED_WORKER": "True"
+      }
+    },
+    "year_filter_aggregator": {
+      "environment": {
+        "INPUT_QUEUE": "transactions_year_filtered_aggregator_input",
+        "OUTPUT_EXCHANGE": "transactions_year_filtered",
+        "REPLICA_COUNT": "3"
+      }
+    },
+    "items_year_filter_sharding_router": {
+      "environment": {
+        "INPUT_QUEUE": "transaction_items_raw",
+        "OUTPUT_EXCHANGE": "transaction_items_sharded",
+        "NUM_SHARDS": "3"
       }
     },
     "items_year_filter": {
       "count": 3,
       "environment": {
-        "INPUT_QUEUE": "transaction_items_raw",
-        "OUTPUT_QUEUE": "transaction_items_year_filtered"
+        "INPUT_EXCHANGE": "transaction_items_sharded",
+        "INPUT_QUEUE": "transaction_items_year_filtered_shard",
+        "OUTPUT_QUEUE": "transaction_items_year_filtered_aggregator_input",
+        "IS_SHARDED_WORKER": "True"
+      }
+    },
+    "items_year_filter_aggregator": {
+      "environment": {
+        "INPUT_QUEUE": "transaction_items_year_filtered_aggregator_input",
+        "OUTPUT_QUEUE": "transaction_items_year_filtered",
+        "REPLICA_COUNT": "3"
+      }
+    },
+    "time_filter_sharding_router": {
+      "environment": {
+        "INPUT_EXCHANGE": "transactions_year_filtered",
+        "INPUT_QUEUE": "transactions_year_filtered_time_sharding_router",
+        "OUTPUT_EXCHANGE": "transactions_time_sharded",
+        "NUM_SHARDS": "3"
       }
     },
     "time_filter": {
       "count": 3,
       "environment": {
-        "INPUT_EXCHANGE": "transactions_year_filtered",
-        "INPUT_QUEUE": "transactions_year_filtered_time",
-        "OUTPUT_EXCHANGE": "transactions_time_filtered"
+        "INPUT_EXCHANGE": "transactions_time_sharded",
+        "INPUT_QUEUE": "transactions_time_filtered_shard",
+        "OUTPUT_QUEUE": "transactions_time_filtered_aggregator_input",
+        "IS_SHARDED_WORKER": "True"
+      }
+    },
+    "time_filter_aggregator": {
+      "environment": {
+        "INPUT_QUEUE": "transactions_time_filtered_aggregator_input",
+        "OUTPUT_EXCHANGE": "transactions_time_filtered",
+        "REPLICA_COUNT": "3"
+      }
+    },
+    "amount_filter_sharding_router": {
+      "environment": {
+        "INPUT_EXCHANGE": "transactions_time_filtered",
+        "INPUT_QUEUE": "transactions_time_filtered_amount_sharding_router",
+        "OUTPUT_EXCHANGE": "transactions_time_filtered_amount_sharded",
+        "NUM_SHARDS": "3"
       }
     },
     "amount_filter": {
       "count": 3,
       "environment": {
-        "INPUT_EXCHANGE": "transactions_time_filtered",
-        "INPUT_QUEUE": "transactions_time_filtered_amount",
-        "OUTPUT_QUEUE": "gateway_results"
+        "INPUT_EXCHANGE": "transactions_time_filtered_amount_sharded",
+        "INPUT_QUEUE": "transactions_time_filtered_amount_shard",
+        "OUTPUT_QUEUE": "gateway_results_aggregator_input",
+        "IS_SHARDED_WORKER": "True"
+      }
+    },
+    "amount_filter_aggregator": {
+      "environment": {
+        "INPUT_QUEUE": "gateway_results_aggregator_input",
+        "OUTPUT_QUEUE": "gateway_results",
+        "REPLICA_COUNT": "3"
       }
     },
     "tpv": {

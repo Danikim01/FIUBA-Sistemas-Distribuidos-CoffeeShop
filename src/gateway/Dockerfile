@@ -18,6 +18,9 @@ COPY src/healthcheck /app/src/healthcheck
 # Copy gateway source code
 COPY src/gateway/ .
 
+# Copy workers source code preserving the package layout
+COPY src/workers /app/src/workers
+
 # Set Python path to include src directory
 ENV PYTHONPATH=/app:/app/src
 
