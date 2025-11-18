@@ -35,13 +35,14 @@ services:
     environment:
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_PORT=5672
-      - OUTPUT_QUEUE=transactions_raw
+      - TRANSACTIONS_EXCHANGE=transactions_sharded
       - RESULTS_QUEUE=gateway_results
       - STORES_EXCHANGE=stores_raw
       - USERS_QUEUE=users_raw
-      - TRANSACTION_ITEMS_QUEUE=transaction_items_raw
+      - TRANSACTION_ITEMS_EXCHANGE=transaction_items_sharded
       - MENU_ITEMS_QUEUE=menu_items_raw
       - CHUNK_SIZE=5000
+      - FILTER_REPLICA_COUNT=3
     restart: unless-stopped
 
   # Client Service (2 instancias)
@@ -91,12 +92,12 @@ services:
       - ./src/client/.data:/app/.data:ro
       - ./results:/app/.results
 
-  # Year Filter Workers (1 instancia)
-  year-filter-worker:
+  # Year Filter Workers (3 instancias)
+  year-filter-worker-1:
     build:
       context: .
       dockerfile: ./src/workers/Dockerfile
-    container_name: year-filter-worker
+    container_name: year-filter-worker-1
     networks:
       - middleware-network
     depends_on:
@@ -105,20 +106,90 @@ services:
     environment:
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_PORT=5672
-      - INPUT_QUEUE=transactions_raw
+      - INPUT_EXCHANGE=transactions_sharded
+      - INPUT_QUEUE=transactions_year_filtered_0
+      - OUTPUT_QUEUE=transactions_year_filtered_aggregator_input
+      - IS_SHARDED_WORKER=True
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=3
+      - NUM_SHARDS=3
+      - WORKER_ID=0
+    command: ["python", "filter/year.py"]
+    restart: unless-stopped
+  year-filter-worker-2:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: year-filter-worker-2
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transactions_sharded
+      - INPUT_QUEUE=transactions_year_filtered_1
+      - OUTPUT_QUEUE=transactions_year_filtered_aggregator_input
+      - IS_SHARDED_WORKER=True
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=3
+      - NUM_SHARDS=3
+      - WORKER_ID=1
+    command: ["python", "filter/year.py"]
+    restart: unless-stopped
+  year-filter-worker-3:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: year-filter-worker-3
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transactions_sharded
+      - INPUT_QUEUE=transactions_year_filtered_2
+      - OUTPUT_QUEUE=transactions_year_filtered_aggregator_input
+      - IS_SHARDED_WORKER=True
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=3
+      - NUM_SHARDS=3
+      - WORKER_ID=2
+    command: ["python", "filter/year.py"]
+    restart: unless-stopped
+
+  # Year Filter Aggregator (1 instancia)
+  year-filter-aggregator:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: year-filter-aggregator
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_QUEUE=transactions_year_filtered_aggregator_input
       - OUTPUT_EXCHANGE=transactions_year_filtered
+      - REPLICA_COUNT=3
       - PREFETCH_COUNT=20
-      - REPLICA_COUNT=1
-      - WORKER_ID=1
-    command: ["python", "filter/year.py"]
+    command: ["python", "router/filter_aggregator.py"]
     restart: unless-stopped
 
-  # Items Year Filter Workers (1 instancia)
-  items-year-filter-worker:
+  # Items Year Filter Workers (3 instancias)
+  items-year-filter-worker-1:
     build:
       context: .
       dockerfile: ./src/workers/Dockerfile
-    container_name: items-year-filter-worker
+    container_name: items-year-filter-worker-1
     networks:
       - middleware-network
     depends_on:
@@ -127,20 +198,89 @@ services:
     environment:
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_PORT=5672
-      - INPUT_QUEUE=transaction_items_raw
-      - OUTPUT_QUEUE=transaction_items_year_filtered
+      - INPUT_EXCHANGE=transaction_items_sharded
+      - INPUT_QUEUE=transaction_items_year_filtered_0
+      - OUTPUT_QUEUE=transaction_items_year_filtered_aggregator_input
+      - IS_SHARDED_WORKER=True
       - PREFETCH_COUNT=20
-      - REPLICA_COUNT=1
-      - WORKER_ID=1
+      - REPLICA_COUNT=3
+      - NUM_SHARDS=3
+      - WORKER_ID=0
     command: ["python", "filter/year.py"]
     restart: unless-stopped
-
-  # Time Filter Workers (1 instancia)
-  time-filter-worker:
+  items-year-filter-worker-2:
     build:
       context: .
       dockerfile: ./src/workers/Dockerfile
-    container_name: time-filter-worker
+    container_name: items-year-filter-worker-2
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transaction_items_sharded
+      - INPUT_QUEUE=transaction_items_year_filtered_1
+      - OUTPUT_QUEUE=transaction_items_year_filtered_aggregator_input
+      - IS_SHARDED_WORKER=True
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=3
+      - NUM_SHARDS=3
+      - WORKER_ID=1
+    command: ["python", "filter/year.py"]
+    restart: unless-stopped
+  items-year-filter-worker-3:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: items-year-filter-worker-3
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transaction_items_sharded
+      - INPUT_QUEUE=transaction_items_year_filtered_2
+      - OUTPUT_QUEUE=transaction_items_year_filtered_aggregator_input
+      - IS_SHARDED_WORKER=True
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=3
+      - NUM_SHARDS=3
+      - WORKER_ID=2
+    command: ["python", "filter/year.py"]
+    restart: unless-stopped
+
+  # Items Year Filter Aggregator (1 instancia)
+  items-year-filter-aggregator:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: items-year-filter-aggregator
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_QUEUE=transaction_items_year_filtered_aggregator_input
+      - OUTPUT_QUEUE=transaction_items_year_filtered
+      - REPLICA_COUNT=3
+      - PREFETCH_COUNT=20
+    command: ["python", "router/filter_aggregator.py"]
+    restart: unless-stopped
+
+  time-filter-sharding-router:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: time-filter-sharding-router
     networks:
       - middleware-network
     depends_on:
@@ -150,20 +290,111 @@ services:
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_PORT=5672
       - INPUT_EXCHANGE=transactions_year_filtered
-      - INPUT_QUEUE=transactions_year_filtered_time
-      - OUTPUT_EXCHANGE=transactions_time_filtered
-      - PREFETCH_COUNT=20
-      - REPLICA_COUNT=1
-      - WORKER_ID=1
-    command: ["python", "filter/time.py"]
+      - INPUT_QUEUE=transactions_filtered_time_sharding_router
+      - OUTPUT_EXCHANGE=transactions_time_sharded
+      - BATCH_SIZE=5000
+      - NUM_SHARDS=3
+      - REPLICA_COUNT=3
+    command: ["python", "sharding/sharding_router.py"]
     restart: unless-stopped
 
-  # Amount Filter Workers (1 instancia)
-  amount-filter-worker:
+  # Time Filter Workers (3 instancias)
+  time-filter-worker-1:
     build:
       context: .
       dockerfile: ./src/workers/Dockerfile
-    container_name: amount-filter-worker
+    container_name: time-filter-worker-1
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transactions_time_sharded
+      - INPUT_QUEUE=transactions_time_filtered_shard_0
+      - OUTPUT_QUEUE=transactions_time_filtered_aggregator_input
+      - IS_SHARDED_WORKER=True
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=3
+      - NUM_SHARDS=3
+      - WORKER_ID=0
+    command: ["python", "filter/time.py"]
+    restart: unless-stopped
+  time-filter-worker-2:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: time-filter-worker-2
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transactions_time_sharded
+      - INPUT_QUEUE=transactions_time_filtered_shard_1
+      - OUTPUT_QUEUE=transactions_time_filtered_aggregator_input
+      - IS_SHARDED_WORKER=True
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=3
+      - NUM_SHARDS=3
+      - WORKER_ID=1
+    command: ["python", "filter/time.py"]
+    restart: unless-stopped
+  time-filter-worker-3:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: time-filter-worker-3
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transactions_time_sharded
+      - INPUT_QUEUE=transactions_time_filtered_shard_2
+      - OUTPUT_QUEUE=transactions_time_filtered_aggregator_input
+      - IS_SHARDED_WORKER=True
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=3
+      - NUM_SHARDS=3
+      - WORKER_ID=2
+    command: ["python", "filter/time.py"]
+    restart: unless-stopped
+
+  # Time Filter Aggregator (1 instancia)
+  time-filter-aggregator:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: time-filter-aggregator
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_QUEUE=transactions_time_filtered_aggregator_input
+      - OUTPUT_EXCHANGE=transactions_time_filtered
+      - REPLICA_COUNT=3
+      - PREFETCH_COUNT=20
+    command: ["python", "router/filter_aggregator.py"]
+    restart: unless-stopped
+
+  amount-filter-sharding-router:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: amount-filter-sharding-router
     networks:
       - middleware-network
     depends_on:
@@ -173,12 +404,104 @@ services:
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_PORT=5672
       - INPUT_EXCHANGE=transactions_time_filtered
-      - INPUT_QUEUE=transactions_time_filtered_amount
-      - OUTPUT_QUEUE=gateway_results
+      - INPUT_QUEUE=transactions_time_filtered_amount_sharding_router
+      - OUTPUT_EXCHANGE=transactions_time_filtered_amount_sharded
+      - BATCH_SIZE=5000
+      - NUM_SHARDS=3
+      - REPLICA_COUNT=3
+    command: ["python", "sharding/sharding_router.py"]
+    restart: unless-stopped
+
+  # Amount Filter Workers (3 instancias)
+  amount-filter-worker-1:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: amount-filter-worker-1
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transactions_time_filtered_amount_sharded
+      - INPUT_QUEUE=transactions_time_filtered_amount_shard_0
+      - OUTPUT_QUEUE=gateway_results_aggregator_input
+      - IS_SHARDED_WORKER=True
       - PREFETCH_COUNT=20
-      - REPLICA_COUNT=1
+      - REPLICA_COUNT=3
+      - NUM_SHARDS=3
+      - WORKER_ID=0
+    command: ["python", "filter/amount.py"]
+    restart: unless-stopped
+  amount-filter-worker-2:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: amount-filter-worker-2
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transactions_time_filtered_amount_sharded
+      - INPUT_QUEUE=transactions_time_filtered_amount_shard_1
+      - OUTPUT_QUEUE=gateway_results_aggregator_input
+      - IS_SHARDED_WORKER=True
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=3
+      - NUM_SHARDS=3
       - WORKER_ID=1
     command: ["python", "filter/amount.py"]
+    restart: unless-stopped
+  amount-filter-worker-3:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: amount-filter-worker-3
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transactions_time_filtered_amount_sharded
+      - INPUT_QUEUE=transactions_time_filtered_amount_shard_2
+      - OUTPUT_QUEUE=gateway_results_aggregator_input
+      - IS_SHARDED_WORKER=True
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=3
+      - NUM_SHARDS=3
+      - WORKER_ID=2
+    command: ["python", "filter/amount.py"]
+    restart: unless-stopped
+
+  # Amount Filter Aggregator (1 instancia)
+  amount-filter-aggregator:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: amount-filter-aggregator
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_QUEUE=gateway_results_aggregator_input
+      - OUTPUT_QUEUE=gateway_results
+      - REPLICA_COUNT=3
+      - PREFETCH_COUNT=20
+    command: ["python", "router/filter_aggregator.py"]
     restart: unless-stopped
 
   # TPV Sharding Router (1 instancia)
@@ -202,17 +525,17 @@ services:
       - REPLICA_COUNT=1
       - BATCH_SIZE=5000
       - BATCH_TIMEOUT=1.0
-      - NUM_SHARDS=1
+      - NUM_SHARDS=3
       - WORKER_ID=0
     command: ["python", "sharding/tpv_sharding_router.py"]
     restart: unless-stopped
 
-  # TPV Sharded Workers (1 instancia)
-  tpv-worker-sharded:
+  # TPV Sharded Workers (3 instancias)
+  tpv-worker-sharded-0:
     build:
       context: .
       dockerfile: ./src/workers/Dockerfile
-    container_name: tpv-worker-sharded
+    container_name: tpv-worker-sharded-0
     networks:
       - middleware-network
     depends_on:
@@ -225,14 +548,67 @@ services:
       - INPUT_QUEUE=transactions_time_filtered_tpv_shard_0
       - OUTPUT_QUEUE=tpv_partial
       - PREFETCH_COUNT=20
-      - REPLICA_COUNT=1
+      - REPLICA_COUNT=3
       - IS_SHARDED_WORKER=True
-      - NUM_SHARDS=1
+      - NUM_SHARDS=3
       - WORKER_ID=0
     command: ["python", "local_top_scaling/tpv_sharded.py"]
     restart: unless-stopped
     volumes:
       - ./logs:/app/logs
+      - ./state:/app/state
+  tpv-worker-sharded-1:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: tpv-worker-sharded-1
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transactions_time_filtered_tpv_sharded
+      - INPUT_QUEUE=transactions_time_filtered_tpv_shard_1
+      - OUTPUT_QUEUE=tpv_partial
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=3
+      - IS_SHARDED_WORKER=True
+      - NUM_SHARDS=3
+      - WORKER_ID=1
+    command: ["python", "local_top_scaling/tpv_sharded.py"]
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+      - ./state:/app/state
+  tpv-worker-sharded-2:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: tpv-worker-sharded-2
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transactions_time_filtered_tpv_sharded
+      - INPUT_QUEUE=transactions_time_filtered_tpv_shard_2
+      - OUTPUT_QUEUE=tpv_partial
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=3
+      - IS_SHARDED_WORKER=True
+      - NUM_SHARDS=3
+      - WORKER_ID=2
+    command: ["python", "local_top_scaling/tpv_sharded.py"]
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+      - ./state:/app/state
 
   # TPV Aggregator (1 instancia)
   tpv-aggregator:
@@ -251,9 +627,11 @@ services:
       - INPUT_QUEUE=tpv_partial
       - OUTPUT_QUEUE=gateway_results
       - PREFETCH_COUNT=20
-      - REPLICA_COUNT=1
+      - REPLICA_COUNT=3
     command: ["python", "final_top_aggregators/final_tvp.py"]
     restart: unless-stopped
+    volumes:
+      - ./state:/app/state
 
   # Items Sharding Router (1 instancia)
   items-sharding-router:
@@ -273,19 +651,19 @@ services:
       - OUTPUT_EXCHANGE=transaction_items_year_filtered_sharded
       - PREFETCH_COUNT=20
       - REPLICA_COUNT=1
-      - BATCH_SIZE=100
+      - BATCH_SIZE=5000
       - BATCH_TIMEOUT=1.0
-      - NUM_SHARDS=1
+      - NUM_SHARDS=3
       - WORKER_ID=0
     command: ["python", "sharding/items_sharding_router.py"]
     restart: unless-stopped
 
-  # Items Sharded Workers (1 instancia)
-  items-worker-sharded:
+  # Items Sharded Workers (3 instancias)
+  items-worker-sharded-0:
     build:
       context: .
       dockerfile: ./src/workers/Dockerfile
-    container_name: items-worker-sharded
+    container_name: items-worker-sharded-0
     networks:
       - middleware-network
     depends_on:
@@ -298,12 +676,64 @@ services:
       - INPUT_QUEUE=transaction_items_year_filtered_shard_0
       - OUTPUT_QUEUE=top_items_partial
       - PREFETCH_COUNT=20
-      - REPLICA_COUNT=1
+      - REPLICA_COUNT=3
       - IS_SHARDED_WORKER=True
-      - NUM_SHARDS=1
+      - NUM_SHARDS=3
       - WORKER_ID=0
     command: ["python", "local_top_scaling/items_sharded.py"]
     restart: unless-stopped
+    volumes:
+      - ./state:/app/state
+  items-worker-sharded-1:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: items-worker-sharded-1
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transaction_items_year_filtered_sharded
+      - INPUT_QUEUE=transaction_items_year_filtered_shard_1
+      - OUTPUT_QUEUE=top_items_partial
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=3
+      - IS_SHARDED_WORKER=True
+      - NUM_SHARDS=3
+      - WORKER_ID=1
+    command: ["python", "local_top_scaling/items_sharded.py"]
+    restart: unless-stopped
+    volumes:
+      - ./state:/app/state
+  items-worker-sharded-2:
+    build:
+      context: .
+      dockerfile: ./src/workers/Dockerfile
+    container_name: items-worker-sharded-2
+    networks:
+      - middleware-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - INPUT_EXCHANGE=transaction_items_year_filtered_sharded
+      - INPUT_QUEUE=transaction_items_year_filtered_shard_2
+      - OUTPUT_QUEUE=top_items_partial
+      - PREFETCH_COUNT=20
+      - REPLICA_COUNT=3
+      - IS_SHARDED_WORKER=True
+      - NUM_SHARDS=3
+      - WORKER_ID=2
+    command: ["python", "local_top_scaling/items_sharded.py"]
+    restart: unless-stopped
+    volumes:
+      - ./state:/app/state
 
   # Top Items Aggregator (1 instancia)
   items-aggregator:
@@ -322,9 +752,11 @@ services:
       - INPUT_QUEUE=top_items_partial
       - OUTPUT_QUEUE=gateway_results
       - PREFETCH_COUNT=20
-      - REPLICA_COUNT=1
+      - REPLICA_COUNT=3
     command: ["python", "final_top_aggregators/final_items.py"]
     restart: unless-stopped
+    volumes:
+      - ./state:/app/state
 
   # Top Clients Sharding Router (1 instancia)
   top-clients-sharding-router:
@@ -345,7 +777,7 @@ services:
       - OUTPUT_EXCHANGE=transactions_year_filtered_sharded
       - PREFETCH_COUNT=20
       - REPLICA_COUNT=1
-      - BATCH_SIZE=100
+      - BATCH_SIZE=5000
       - BATCH_TIMEOUT=1.0
       - NUM_SHARDS=4
       - WORKER_ID=0
@@ -376,6 +808,8 @@ services:
       - WORKER_ID=0
     command: ["python", "local_top_scaling/users_sharded.py"]
     restart: unless-stopped
+    volumes:
+      - ./state:/app/state
   top-clients-worker-sharded-1:
     build:
       context: .
@@ -399,6 +833,8 @@ services:
       - WORKER_ID=1
     command: ["python", "local_top_scaling/users_sharded.py"]
     restart: unless-stopped
+    volumes:
+      - ./state:/app/state
   top-clients-worker-sharded-2:
     build:
       context: .
@@ -422,6 +858,8 @@ services:
       - WORKER_ID=2
     command: ["python", "local_top_scaling/users_sharded.py"]
     restart: unless-stopped
+    volumes:
+      - ./state:/app/state
   top-clients-worker-sharded-3:
     build:
       context: .
@@ -445,6 +883,8 @@ services:
       - WORKER_ID=3
     command: ["python", "local_top_scaling/users_sharded.py"]
     restart: unless-stopped
+    volumes:
+      - ./state:/app/state
 
   # Top Clients Birthdays Aggregator (1 instancia)
   top-clients-birthdays-aggregator:
@@ -466,6 +906,8 @@ services:
       - REPLICA_COUNT=4
     command: ["python", "final_top_aggregators/final_users.py"]
     restart: unless-stopped
+    volumes:
+      - ./state:/app/state
 
   # Healthcheckers (3 instancias)
   healthchecker-1:
@@ -485,7 +927,7 @@ services:
       - HEALTHCHECK_INTERVAL_MS=1000
       - HEALTHCHECK_TIMEOUT_MS=1500
       - HEALTHCHECK_MAX_ERRORS=3
-      - NODES_TO_CHECK=coffee-gateway year-filter-worker items-year-filter-worker items-sharding-router top-clients-worker-sharded-3
+      - NODES_TO_CHECK=coffee-gateway time-filter-worker-2 time-filter-aggregator amount-filter-worker-1 amount-filter-worker-2 tpv-worker-sharded-1 items-sharding-router top-clients-worker-sharded-3
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     stop_grace_period: 10s
@@ -508,7 +950,7 @@ services:
       - HEALTHCHECK_INTERVAL_MS=1000
       - HEALTHCHECK_TIMEOUT_MS=1500
       - HEALTHCHECK_MAX_ERRORS=3
-      - NODES_TO_CHECK=amount-filter-worker tpv-worker-sharded tpv-aggregator items-worker-sharded items-aggregator top-clients-sharding-router top-clients-worker-sharded-1 top-clients-birthdays-aggregator
+      - NODES_TO_CHECK=year-filter-worker-1 year-filter-worker-3 items-year-filter-aggregator tpv-worker-sharded-0 tpv-aggregator items-worker-sharded-2 items-aggregator top-clients-sharding-router top-clients-worker-sharded-1 top-clients-birthdays-aggregator
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     stop_grace_period: 10s
@@ -531,7 +973,7 @@ services:
       - HEALTHCHECK_INTERVAL_MS=1000
       - HEALTHCHECK_TIMEOUT_MS=1500
       - HEALTHCHECK_MAX_ERRORS=3
-      - NODES_TO_CHECK=time-filter-worker tpv-sharding-router top-clients-worker-sharded-0 top-clients-worker-sharded-2
+      - NODES_TO_CHECK=year-filter-worker-2 year-filter-aggregator items-year-filter-worker-1 items-year-filter-worker-2 items-year-filter-worker-3 time-filter-worker-1 time-filter-worker-3 amount-filter-sharding-router amount-filter-worker-3 amount-filter-aggregator tpv-sharding-router tpv-worker-sharded-2 items-worker-sharded-0 items-worker-sharded-1 top-clients-worker-sharded-0 top-clients-worker-sharded-2
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     stop_grace_period: 10s

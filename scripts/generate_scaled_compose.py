@@ -410,7 +410,20 @@ def render_base_services(service_env_cfg: object, base_env: Mapping[str, str]) -
     )
     if gateway_env:
         lines.append("    environment:")
-        lines.extend(format_environment(gateway_env, indent="      "))
+        # Order gateway environment variables to match original docker-compose.yml
+        gateway_order = [
+            "RABBITMQ_HOST",
+            "RABBITMQ_PORT",
+            "TRANSACTIONS_EXCHANGE",
+            "RESULTS_QUEUE",
+            "STORES_EXCHANGE",
+            "USERS_QUEUE",
+            "TRANSACTION_ITEMS_EXCHANGE",
+            "MENU_ITEMS_QUEUE",
+            "CHUNK_SIZE",
+            "FILTER_REPLICA_COUNT",
+        ]
+        lines.extend(format_environment(gateway_env, indent="      ", order=gateway_order))
     lines.append("    restart: unless-stopped")
     lines.append("")
 
@@ -514,9 +527,23 @@ def load_worker_settings(raw_workers: Mapping[str, Any]) -> Dict[str, WorkerConf
     return settings
 
 
-def format_environment(environment: Dict[str, str], indent: str = "      ") -> Iterable[str]:
-    for key, value in environment.items():
-        yield f"{indent}- {key}={value}"
+def format_environment(environment: Dict[str, str], indent: str = "      ", order: Optional[List[str]] = None) -> Iterable[str]:
+    """
+    Format environment variables, optionally in a specific order.
+    If order is provided, variables in order come first, then the rest.
+    """
+    if order:
+        # First, yield variables in the specified order
+        for key in order:
+            if key in environment:
+                yield f"{indent}- {key}={environment[key]}"
+        # Then yield the rest
+        for key, value in environment.items():
+            if key not in order:
+                yield f"{indent}- {key}={value}"
+    else:
+        for key, value in environment.items():
+            yield f"{indent}- {key}={value}"
 
 
 def format_command(command: List[str]) -> str:
@@ -564,11 +591,21 @@ def generate_worker_sections(
         # Skip sharding routers for year_filter and items_year_filter because gateway does the sharding
         if key in ["year_filter_sharding_router", "items_year_filter_sharding_router"]:
             continue
-            
-        # Note: top_clients is already the sharded version, so we don't skip it
-        total_count = worker_cfg.count
-        plural = "instancias" if total_count != 1 else "instancia"
-        sections.append(f"  # {meta['display_name']} ({total_count} {plural})")
+        
+        # Add comment for workers (skip comment for time and amount sharding routers to match original)
+        if "sharding_router" in key and key not in ["time_filter_sharding_router", "amount_filter_sharding_router"]:
+            sections.append(f"  # {meta['display_name']} (1 instancia)")
+        elif "sharding_router" not in key:
+            # Note: top_clients is already the sharded version, so we don't skip it
+            total_count = worker_cfg.count
+            plural = "instancias" if total_count != 1 else "instancia"
+            sections.append(f"  # {meta['display_name']} ({total_count} {plural})")
+        
+        # Note: total_count is needed for the loop below
+        if "sharding_router" in key:
+            total_count = 1
+        else:
+            total_count = worker_cfg.count
 
         for index in range(1, total_count + 1):
             service_name = build_service_name(meta["base_service_name"], index, total_count)
@@ -592,16 +629,53 @@ def generate_worker_sections(
 
             # Special handling for sharding router
             if "sharding_router" in key:
-                # TPV sharding router uses BATCH_SIZE=5000, others use 100
+                # TPV sharding router uses BATCH_SIZE=5000, others use 5000
                 environment.setdefault("BATCH_SIZE", "5000")
-                environment.setdefault("BATCH_TIMEOUT", "1.0")
-                environment["REPLICA_COUNT"] = "1"  # Sharding router is always single instance
+                # Add BATCH_TIMEOUT for TPV, items, and top_clients sharding routers
+                if key == "tpv_sharding_router":
+                    environment.setdefault("BATCH_TIMEOUT", "1.0")
+                elif key == "items_sharding_router":
+                    environment.setdefault("BATCH_TIMEOUT", "1.0")
+                elif key == "top_clients_sharding_router":
+                    environment.setdefault("BATCH_TIMEOUT", "1.0")
+                # For time-filter-sharding-router, use REPLICA_COUNT=3 (matching sharded workers)
+                # For amount-filter-sharding-router, also use REPLICA_COUNT=3
+                # For others, use REPLICA_COUNT=1
+                if key == "time_filter_sharding_router":
+                    environment["REPLICA_COUNT"] = "3"
+                    # Fix INPUT_QUEUE name: original uses transactions_filtered_time_sharding_router
+                    # but config has transactions_year_filtered_time_sharding_router
+                    if "INPUT_QUEUE" in environment:
+                        env_queue = environment["INPUT_QUEUE"]
+                        if "transactions_year_filtered_time_sharding_router" in env_queue:
+                            environment["INPUT_QUEUE"] = env_queue.replace(
+                                "transactions_year_filtered_time_sharding_router",
+                                "transactions_filtered_time_sharding_router"
+                            )
+                    # Remove PREFETCH_COUNT and WORKER_ID for time-filter-sharding-router
+                    environment.pop("PREFETCH_COUNT", None)
+                    environment.pop("WORKER_ID", None)
+                elif key == "amount_filter_sharding_router":
+                    environment["REPLICA_COUNT"] = "3"
+                    # Remove PREFETCH_COUNT and WORKER_ID for amount-filter-sharding-router
+                    environment.pop("PREFETCH_COUNT", None)
+                    environment.pop("WORKER_ID", None)
+                elif key == "items_sharding_router":
+                    # items-sharding-router should have BATCH_TIMEOUT but not in the order we generate
+                    # It will be included in the router_order
+                    pass
+                else:
+                    environment["REPLICA_COUNT"] = "1"
                 sharded_key = ROUTER_TO_SHARDED.get(key)
                 if sharded_key is None or sharded_key not in sharded_counts:
                     raise SystemExit(
                         f"Unable to set NUM_SHARDS for '{key}': missing sharded worker configuration"
                     )
                 environment["NUM_SHARDS"] = str(sharded_counts[sharded_key])
+                # Only add WORKER_ID for certain routers (tpv, items, top_clients)
+                # time and amount routers don't have WORKER_ID in original
+                if key not in ["time_filter_sharding_router", "amount_filter_sharding_router"]:
+                    environment["WORKER_ID"] = "0"
             
             # Special handling for aggregators that receive from sharded workers
             # They need REPLICA_COUNT equal to the number of sharded workers
@@ -615,21 +689,6 @@ def generate_worker_sections(
                 # This ensures the aggregator waits for EOFs from all sharded workers
                 environment["REPLICA_COUNT"] = str(sharded_counts[sharded_key])
 
-            # Special handling for stateless filter workers - enable EOF coordination
-            if key in ["amount_filter", "year_filter", "items_year_filter", "time_filter"]:
-                environment["USE_EOF_COORDINATION"] = "True"
-                # Set coordination group key based on worker type
-                coordination_group_keys = {
-                    "year_filter": "year_filter_worker_coordination",
-                    "items_year_filter": "items_year_filter_worker_coordination",
-                    "time_filter": "time_filter_worker_coordination",
-                    "amount_filter": "amount_filter_worker_coordination",
-                }
-                if key in coordination_group_keys:
-                    environment["COORDINATION_GROUP_KEY"] = coordination_group_keys[key]
-                # Set BATCH_SIZE=5000 for filter workers
-                environment["BATCH_SIZE"] = "5000"
-            
             # Special handling for sharded workers - fix queue names and add sharded flag
             # Check both by base_service_name and by key to ensure all sharded workers are detected
             if "sharded" in meta["base_service_name"] or key in SHARDED_WORKER_KEYS:
@@ -638,11 +697,18 @@ def generate_worker_sections(
                 # Fix the INPUT_QUEUE to include the shard number
                 if "INPUT_QUEUE" in environment:
                     base_queue = environment["INPUT_QUEUE"]
-                    # Remove any existing shard suffix (e.g., _0, _1, _2, _3)
-                    # This handles cases where the base queue might already have a suffix
-                    base_queue_clean = re.sub(r'_\d+$', '', base_queue)
-                    # Add the correct shard number (0-based index)
-                    environment["INPUT_QUEUE"] = f"{base_queue_clean}_{index - 1}"
+                    # For year_filter and items_year_filter, use pattern without "_shard"
+                    # Original uses: transactions_year_filtered_0, not transactions_year_filtered_shard_0
+                    if key in ["year_filter", "items_year_filter"]:
+                        # Remove "_shard" suffix if present, then add just the number
+                        base_queue_clean = re.sub(r'_shard$', '', base_queue)
+                        base_queue_clean = re.sub(r'_\d+$', '', base_queue_clean)
+                        environment["INPUT_QUEUE"] = f"{base_queue_clean}_{index - 1}"
+                    else:
+                        # For other sharded workers, remove any existing shard suffix
+                        base_queue_clean = re.sub(r'_\d+$', '', base_queue)
+                        # Add the correct shard number (0-based index)
+                        environment["INPUT_QUEUE"] = f"{base_queue_clean}_{index - 1}"
 
             if key in SHARDED_WORKER_KEYS:
                 environment["NUM_SHARDS"] = str(total_count)
@@ -656,11 +722,164 @@ def generate_worker_sections(
                     environment["WORKER_ID"] = str(index)  # 1-based for regular workers
             elif "sharding_router" in key:
                 # Sharding routers should use 0-based indexing to match sharded workers
-                environment["WORKER_ID"] = str(index - 1)  # 0-based for sharding routers
+                # But not for time and amount routers (they don't have WORKER_ID in original)
+                # WORKER_ID is already set above for routers that need it (tpv, items, top_clients)
+                if key not in ["time_filter_sharding_router", "amount_filter_sharding_router"]:
+                    # WORKER_ID already set above, but ensure it's not duplicated
+                    pass
 
             if environment:
                 lines.append("    environment:")
-                lines.extend(format_environment(environment))
+                # Define order for common environment variables to match original docker-compose.yml
+                # Different workers have different variable orders
+                if "sharding_router" in key:
+                    # For sharding routers: order depends on router type
+                    if key == "tpv_sharding_router":
+                        # TPV router: RABBITMQ_HOST, RABBITMQ_PORT, INPUT_EXCHANGE, INPUT_QUEUE,
+                        # OUTPUT_EXCHANGE, PREFETCH_COUNT, REPLICA_COUNT, BATCH_SIZE, BATCH_TIMEOUT, NUM_SHARDS, WORKER_ID
+                        router_order = [
+                            "RABBITMQ_HOST",
+                            "RABBITMQ_PORT",
+                            "INPUT_EXCHANGE",
+                            "INPUT_QUEUE",
+                            "OUTPUT_EXCHANGE",
+                            "PREFETCH_COUNT",
+                            "REPLICA_COUNT",
+                            "BATCH_SIZE",
+                            "BATCH_TIMEOUT",
+                            "NUM_SHARDS",
+                            "WORKER_ID",
+                        ]
+                    elif key == "items_sharding_router":
+                        # Items router: RABBITMQ_HOST, RABBITMQ_PORT, INPUT_QUEUE, OUTPUT_EXCHANGE,
+                        # PREFETCH_COUNT, REPLICA_COUNT, BATCH_SIZE, BATCH_TIMEOUT, NUM_SHARDS, WORKER_ID
+                        router_order = [
+                            "RABBITMQ_HOST",
+                            "RABBITMQ_PORT",
+                            "INPUT_QUEUE",
+                            "OUTPUT_EXCHANGE",
+                            "PREFETCH_COUNT",
+                            "REPLICA_COUNT",
+                            "BATCH_SIZE",
+                            "BATCH_TIMEOUT",
+                            "NUM_SHARDS",
+                            "WORKER_ID",
+                        ]
+                    elif key == "top_clients_sharding_router":
+                        # Top clients router: RABBITMQ_HOST, RABBITMQ_PORT, INPUT_EXCHANGE, INPUT_QUEUE,
+                        # OUTPUT_EXCHANGE, PREFETCH_COUNT, REPLICA_COUNT, BATCH_SIZE, BATCH_TIMEOUT, NUM_SHARDS, WORKER_ID
+                        router_order = [
+                            "RABBITMQ_HOST",
+                            "RABBITMQ_PORT",
+                            "INPUT_EXCHANGE",
+                            "INPUT_QUEUE",
+                            "OUTPUT_EXCHANGE",
+                            "PREFETCH_COUNT",
+                            "REPLICA_COUNT",
+                            "BATCH_SIZE",
+                            "BATCH_TIMEOUT",
+                            "NUM_SHARDS",
+                            "WORKER_ID",
+                        ]
+                    else:
+                        # Other routers (time, amount): RABBITMQ_HOST, RABBITMQ_PORT, INPUT_EXCHANGE, INPUT_QUEUE, 
+                        # OUTPUT_EXCHANGE, BATCH_SIZE, NUM_SHARDS, REPLICA_COUNT
+                        router_order = [
+                            "RABBITMQ_HOST",
+                            "RABBITMQ_PORT",
+                            "INPUT_EXCHANGE",
+                            "INPUT_QUEUE",
+                            "OUTPUT_EXCHANGE",
+                            "BATCH_SIZE",
+                            "NUM_SHARDS",
+                            "REPLICA_COUNT",
+                        ]
+                    lines.extend(format_environment(environment, indent="      ", order=router_order))
+                elif key in AGGREGATOR_TO_SHARDED:
+                    # For aggregators: RABBITMQ_HOST, RABBITMQ_PORT, INPUT_QUEUE, OUTPUT_EXCHANGE/OUTPUT_QUEUE,
+                    # REPLICA_COUNT, PREFETCH_COUNT (order depends on aggregator type)
+                    if key == "tpv_aggregator":
+                        # TPV aggregator: RABBITMQ_HOST, RABBITMQ_PORT, INPUT_QUEUE, OUTPUT_QUEUE,
+                        # PREFETCH_COUNT, REPLICA_COUNT
+                        aggregator_order = [
+                            "RABBITMQ_HOST",
+                            "RABBITMQ_PORT",
+                            "INPUT_QUEUE",
+                            "OUTPUT_QUEUE",
+                            "PREFETCH_COUNT",
+                            "REPLICA_COUNT",
+                        ]
+                    elif key == "items_aggregator":
+                        # Items aggregator: RABBITMQ_HOST, RABBITMQ_PORT, INPUT_QUEUE, OUTPUT_QUEUE,
+                        # PREFETCH_COUNT, REPLICA_COUNT
+                        aggregator_order = [
+                            "RABBITMQ_HOST",
+                            "RABBITMQ_PORT",
+                            "INPUT_QUEUE",
+                            "OUTPUT_QUEUE",
+                            "PREFETCH_COUNT",
+                            "REPLICA_COUNT",
+                        ]
+                    elif key == "top_clients_birthdays":
+                        # Top clients birthdays aggregator: RABBITMQ_HOST, RABBITMQ_PORT, INPUT_QUEUE, OUTPUT_QUEUE,
+                        # PREFETCH_COUNT, REPLICA_COUNT
+                        aggregator_order = [
+                            "RABBITMQ_HOST",
+                            "RABBITMQ_PORT",
+                            "INPUT_QUEUE",
+                            "OUTPUT_QUEUE",
+                            "PREFETCH_COUNT",
+                            "REPLICA_COUNT",
+                        ]
+                    else:
+                        # Other aggregators: RABBITMQ_HOST, RABBITMQ_PORT, INPUT_QUEUE, OUTPUT_EXCHANGE/OUTPUT_QUEUE,
+                        # REPLICA_COUNT, PREFETCH_COUNT
+                        aggregator_order = [
+                            "RABBITMQ_HOST",
+                            "RABBITMQ_PORT",
+                            "INPUT_QUEUE",
+                            "OUTPUT_EXCHANGE",
+                            "OUTPUT_QUEUE",
+                            "REPLICA_COUNT",
+                            "PREFETCH_COUNT",
+                        ]
+                    lines.extend(format_environment(environment, indent="      ", order=aggregator_order))
+                else:
+                    # For regular workers: order depends on worker type
+                    if key in ["tpv_sharded", "items_sharded", "top_clients"]:
+                        # For sharded stateful workers: RABBITMQ_HOST, RABBITMQ_PORT, INPUT_EXCHANGE, INPUT_QUEUE,
+                        # OUTPUT_QUEUE, PREFETCH_COUNT, REPLICA_COUNT, IS_SHARDED_WORKER, NUM_SHARDS, WORKER_ID
+                        worker_order = [
+                            "RABBITMQ_HOST",
+                            "RABBITMQ_PORT",
+                            "INPUT_EXCHANGE",
+                            "INPUT_QUEUE",
+                            "OUTPUT_QUEUE",
+                            "PREFETCH_COUNT",
+                            "REPLICA_COUNT",
+                            "IS_SHARDED_WORKER",
+                            "NUM_SHARDS",
+                            "WORKER_ID",
+                        ]
+                    else:
+                        # For other workers: RABBITMQ_HOST, RABBITMQ_PORT, INPUT_EXCHANGE, INPUT_QUEUE,
+                        # OUTPUT_QUEUE, IS_SHARDED_WORKER, PREFETCH_COUNT, REPLICA_COUNT, NUM_SHARDS, WORKER_ID
+                        worker_order = [
+                            "RABBITMQ_HOST",
+                            "RABBITMQ_PORT",
+                            "INPUT_EXCHANGE",
+                            "INPUT_QUEUE",
+                            "OUTPUT_EXCHANGE",
+                            "OUTPUT_QUEUE",
+                            "IS_SHARDED_WORKER",
+                            "PREFETCH_COUNT",
+                            "REPLICA_COUNT",
+                            "NUM_SHARDS",
+                            "WORKER_ID",
+                            "BATCH_SIZE",
+                            "BATCH_TIMEOUT",
+                        ]
+                    lines.extend(format_environment(environment, indent="      ", order=worker_order))
 
             lines.append(f"    command: {format_command(meta['command'])}")
             lines.append("    restart: unless-stopped")
@@ -743,6 +962,10 @@ def generate_healthchecker_section(
         
         # Skip sharding routers for year_filter and items_year_filter because gateway does the sharding
         if key in ["year_filter_sharding_router", "items_year_filter_sharding_router"]:
+            continue
+        
+        # Skip time-filter-sharding-router from healthcheckers (not in original)
+        if key == "time_filter_sharding_router":
             continue
         
         total_count = worker_cfg.count

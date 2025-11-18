@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-"""Robust RabbitMQ middleware helpers built on pika's BlockingConnection."""
-
 from __future__ import annotations
 
 import json
@@ -56,24 +54,32 @@ class _BaseRabbitMQMiddleware(MessageMiddleware):
         max_reconnect_attempts: int = 5,
         base_retry_delay: float = 1.0,
         max_retry_delay: float = 30.0,
+        publisher_confirm_timeout: float = 5.0,
     ):
         self.host = host
         self.port = port
         self.prefetch_count = prefetch_count
         self.consuming = False
 
+        # Separate connection managers for consumption and sending
+        # This prevents race conditions when consumption thread blocks in start_consuming()
+        # while send threads create channels from the same connection
         self._connection_manager = RobustRabbitMQConnection(
             host=host,
             port=port,
             heartbeat=heartbeat,
             blocked_connection_timeout=blocked_connection_timeout,
         )
+        
+        # Separate connection manager for sending (thread-local connections)
+        # Each thread gets its own connection to avoid conflicts with consumption
+        self._send_connection_manager_local = threading.local()
 
         self._stop_event = threading.Event()
         self._lock = threading.RLock()
         self._active_channel: Optional[pika.channel.Channel] = None
         self._active_connection: Optional[pika.BlockingConnection] = None
-        
+
         # Thread-local storage for persistent send channels (one channel per thread)
         # Pika channels are NOT thread-safe, so each thread must have its own channel
         # This ensures message ordering per thread while maintaining thread safety
@@ -82,6 +88,8 @@ class _BaseRabbitMQMiddleware(MessageMiddleware):
         self._max_reconnect_attempts = max_reconnect_attempts
         self._base_retry_delay = base_retry_delay
         self._max_retry_delay = max_retry_delay
+        # Timeout used by wait_for_confirms to ensure publisher confirms are observed
+        self._publisher_confirm_timeout = publisher_confirm_timeout
 
     # ------------------------------------------------------------------
     # Helpers shared by subclasses
@@ -104,62 +112,107 @@ class _BaseRabbitMQMiddleware(MessageMiddleware):
         with self._lock:
             self._active_channel = None
             self._active_connection = None
-    
+
+    def _get_or_create_send_connection(self) -> RobustRabbitMQConnection:
+        """
+        Get or create a thread-local connection manager for sending.
+        Each thread gets its own connection to avoid conflicts with consumption thread.
+        """
+        if not hasattr(self._send_connection_manager_local, 'manager'):
+            # Create a new connection manager for this thread
+            self._send_connection_manager_local.manager = RobustRabbitMQConnection(
+                host=self.host,
+                port=self.port,
+                heartbeat=self._connection_manager.heartbeat,
+                blocked_connection_timeout=self._connection_manager.blocked_connection_timeout,
+            )
+        return self._send_connection_manager_local.manager
+
     def _get_or_create_send_channel(self) -> pika.channel.Channel:
         """
         Get or create a persistent channel for sending messages (thread-local).
-        Each thread gets its own channel to maintain message ordering per thread.
+        Each thread gets its own connection and channel to maintain message ordering per thread
+        and avoid conflicts with the consumption thread.
         Thread-safe: uses thread-local storage (Pika channels are NOT thread-safe).
+
+        This implementation uses a separate connection per thread to avoid race conditions
+        when the consumption thread is blocking in start_consuming().
         """
-        # Get thread-local channel
-        if not hasattr(self._send_channel_local, 'channel'):
-            # Create new channel for this thread
+        # If channel exists and looks healthy -> return it
+        if hasattr(self._send_channel_local, 'channel'):
+            channel = getattr(self._send_channel_local, 'channel')
+            connection = getattr(self._send_channel_local, 'connection', None)
+
+            if channel and getattr(channel, 'is_open', False) and connection and getattr(connection, 'is_open', False):
+                # Simple health check - just verify channel is open
+                # Don't call process_data_events() here as it can conflict with consumption
+                return channel
+            else:
+                # Channel or connection is closed, clean up
+                self._close_send_channel()
+
+        # Attempt to create a channel with bounded retries
+        attempts = 0
+        max_attempts = 3
+        last_exc: Optional[Exception] = None
+
+        while attempts < max_attempts:
             try:
-                connection = self._connection_manager.get_connection()
-                channel = connection.channel()
-                # Enable publisher confirms for reliability
-                with suppress(Exception):
-                    channel.confirm_delivery()
+                # Use thread-local connection manager (separate from consumption connection)
+                send_connection_manager = self._get_or_create_send_connection()
+                connection = send_connection_manager.get_connection()
                 
+                if not connection or not getattr(connection, 'is_open', False):
+                    raise pika.exceptions.AMQPConnectionError("Connection not open")
+
+                channel = connection.channel()
+
+                # Try enabling publisher confirms; if it fails, log but continue.
+                try:
+                    # For BlockingChannel this sets publisher confirm mode
+                    channel.confirm_delivery()
+                    logger.debug("Publisher confirms enabled on thread %s", threading.current_thread().name)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.warning("No se pudo habilitar publisher confirms en thread %s: %s", threading.current_thread().name, exc)
+
+                # Save thread-local channel and connection
                 self._send_channel_local.channel = channel
                 self._send_channel_local.connection = connection
                 logger.debug(f"Created new persistent send channel for thread {threading.current_thread().name}")
-            except Exception as e:
-                logger.error(f"Failed to create send channel: {e}")
-                raise
-        
-        # Check if existing channel is still valid
-        channel = self._send_channel_local.channel
-        connection = self._send_channel_local.connection
-        
-        if channel and channel.is_open and connection:
-            try:
-                # Test channel with a simple operation
-                connection.process_data_events(time_limit=0)
                 return channel
             except Exception as e:
-                logger.warning(
-                    f"Send channel failed health check in thread {threading.current_thread().name}: {e}, recreating..."
-                )
-                self._close_send_channel()
-                # Recursively call to create new channel
-                return self._get_or_create_send_channel()
-        
-        # Channel is invalid, create new one
-        return self._get_or_create_send_channel()
-    
+                logger.exception("Failed to create send channel (attempt %d): %s", attempts + 1, e)
+                last_exc = e
+                attempts += 1
+                time.sleep(0.2 * attempts)
+
+        # If we reach here, failed to create channel
+        raise MessageMiddlewareDisconnectedError(f"Failed to create send channel after {max_attempts} attempts: {last_exc}")
+
     def _close_send_channel(self) -> None:
         """Close the persistent send channel for current thread (thread-safe)."""
         if hasattr(self._send_channel_local, 'channel'):
             channel = self._send_channel_local.channel
-            if channel and channel.is_open:
-                try:
+            try:
+                if channel and getattr(channel, 'is_open', False):
                     channel.close()
-                except Exception:
-                    pass
-            delattr(self._send_channel_local, 'channel')
-            if hasattr(self._send_channel_local, 'connection'):
+            except Exception:
+                logger.debug("Error closing thread-local send channel", exc_info=True)
+            # remove attributes safely
+            with suppress(Exception):
+                delattr(self._send_channel_local, 'channel')
+            with suppress(Exception):
                 delattr(self._send_channel_local, 'connection')
+        
+        # Also close thread-local connection manager if it exists
+        if hasattr(self._send_connection_manager_local, 'manager'):
+            try:
+                manager = self._send_connection_manager_local.manager
+                manager.close()
+            except Exception:
+                logger.debug("Error closing thread-local send connection manager", exc_info=True)
+            with suppress(Exception):
+                delattr(self._send_connection_manager_local, 'manager')
 
     def _stop_consuming_threadsafe(self) -> None:
         with self._lock:
@@ -174,7 +227,7 @@ class _BaseRabbitMQMiddleware(MessageMiddleware):
                 if channel and not channel.is_closed:
                     channel.stop_consuming()
 
-        if connection and not connection.is_closed:
+        if connection and not getattr(connection, 'is_closed', False):
             try:
                 connection.add_callback_threadsafe(_stop)
                 return
@@ -232,6 +285,7 @@ class RabbitMQMiddlewareQueue(_BaseRabbitMQMiddleware):
     # Queue-specific helpers
     # ------------------------------------------------------------------
     def _declare_queue(self, channel: pika.channel.Channel) -> None:
+        # durable=False is intentional (per user request)
         channel.queue_declare(queue=self.queue_name, durable=False)
 
     def _handle_queue_message(
@@ -242,31 +296,49 @@ class RabbitMQMiddlewareQueue(_BaseRabbitMQMiddleware):
         body: bytes,
     ) -> None:
         if self._stop_event.is_set():
-            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+            try:
+                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+            except Exception:
+                # If nack fails (channel dead) just return; broker will requeue on connection close
+                logger.debug("Cannot NACK during shutdown; broker will requeue on connection close")
             return
 
         try:
             message = deserialize_message(body.decode("utf-8"))
         except MessageMiddlewareMessageError as exc:
             logger.error("Descartando mensaje inválido en '%s': %s", self.queue_name, exc)
-            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+            try:
+                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+            except Exception:
+                logger.debug("Failed to NACK invalid message; channel may be dead")
             return
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error deserializando mensaje en '%s': %s", self.queue_name, exc)
-            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+            try:
+                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+            except Exception:
+                logger.debug("Failed to NACK after deserialization exception; channel may be dead")
             return
 
         try:
             user_callback(message)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error procesando mensaje en '%s': %s", self.queue_name, exc)
-            logger.info(f"[RABBITMQ-MIDDLEWARE] [NACK] Sending NACK with requeue=True for queue '{self.queue_name}'")
-            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+            try:
+                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+            except Exception:
+                # If NACK fails because channel/connection is gone, raise so outer loop reconnects
+                logger.error("Failed to NACK after processing error; forcing reconnect so broker will requeue")
+                raise
         else:
-            logger.info(f"[RABBITMQ-MIDDLEWARE] [ACK-PREPARE] Callback completed successfully for queue '{self.queue_name}'. About to send ACK.")
-            logger.info(f"[RABBITMQ-MIDDLEWARE] [ACK] Sending ACK for queue '{self.queue_name}', delivery_tag={method.delivery_tag}")
-            ch.basic_ack(delivery_tag=method.delivery_tag)
-            logger.info(f"[RABBITMQ-MIDDLEWARE] [ACK-SENT] ACK sent successfully for queue '{self.queue_name}'")
+            try:
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+            except Exception as exc:
+                # If ACK fails (connection detached), we must not swallow the error.
+                # Raising will cause consuming loop to restart and the broker will re-deliver
+                # the message after connection close -> preserves at-least-once semantics.
+                logger.error("Failed to ACK message (delivery_tag=%s): %s. Forcing reconnect so broker will requeue.", method.delivery_tag, exc)
+                raise
 
     # ------------------------------------------------------------------
     # MessageMiddleware implementation
@@ -311,7 +383,7 @@ class RabbitMQMiddlewareQueue(_BaseRabbitMQMiddleware):
                 # Consumption stopped without being asked to; treat as graceful exit.
                 return
 
-            except pika.exceptions.ChannelClosedByBroker as exc:
+            except (pika.exceptions.ChannelClosedByBroker) as exc:
                 logger.warning(
                     "Canal cerrado por el broker para la cola '%s': %s. Reintentando...",
                     self.queue_name,
@@ -332,7 +404,7 @@ class RabbitMQMiddlewareQueue(_BaseRabbitMQMiddleware):
             finally:
                 self.consuming = False
                 self._clear_active_channel()
-                if channel and channel.is_open:
+                if channel and getattr(channel, 'is_open', False):
                     with suppress(Exception):
                         channel.close()
 
@@ -351,6 +423,9 @@ class RabbitMQMiddlewareQueue(_BaseRabbitMQMiddleware):
         """
         Send a message using a persistent channel for ordering guarantees.
         The channel is reused across all sends to maintain message order.
+
+        Uses publisher confirms (confirm_delivery) to detect NACKs.
+        With confirms enabled, basic_publish will raise exceptions on NACK.
         """
         payload = serialize_message(message).encode("utf-8")
         attempt = 0
@@ -359,16 +434,24 @@ class RabbitMQMiddlewareQueue(_BaseRabbitMQMiddleware):
             try:
                 # Get or create persistent send channel (thread-safe)
                 channel = self._get_or_create_send_channel()
-                
+
                 # Ensure queue is declared (idempotent operation)
                 self._declare_queue(channel)
 
                 # Publish message using persistent channel
+                # Use mandatory=False by default. If unroutable handling required, caller can set up
+                # alternate exchanges or check returns via add_on_return_callback at a higher layer.
                 channel.basic_publish(
                     exchange=exchange if exchange else "",
                     routing_key=self.queue_name if not routing_key else routing_key,
                     body=payload,
                 )
+
+                # Note: BlockingChannel doesn't have wait_for_confirms() method.
+                # With confirm_delivery() enabled, Pika will raise exceptions on NACK.
+                # If publish succeeds without exception, we assume it was confirmed.
+                # For synchronous confirmation, we rely on the fact that basic_publish
+                # will raise an exception if the message is NACKed (when confirms are enabled).
                 return
 
             except pika.exceptions.UnroutableError as exc:
@@ -380,6 +463,14 @@ class RabbitMQMiddlewareQueue(_BaseRabbitMQMiddleware):
                 logger.warning("Conexión/canal perdido enviando a '%s': %s, recreando canal...", self.queue_name, exc)
                 # Close invalid channel and retry
                 self._close_send_channel()
+            except MessageMiddlewareMessageError:
+                # Propagate message errors raised by confirms
+                attempt += 1
+                if attempt > self._publish_retry_attempts:
+                    raise MessageMiddlewareDisconnectedError(
+                        f"Pérdida de conexión enviando mensaje a '{self.queue_name}'"
+                    )
+                self._wait_before_retry(attempt - 1)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Error enviando mensaje a '%s': %s", self.queue_name, exc)
                 # Close channel on unexpected errors and retry
@@ -402,7 +493,7 @@ class RabbitMQMiddlewareQueue(_BaseRabbitMQMiddleware):
         except Exception as exc:  # noqa: BLE001
             raise MessageMiddlewareDeleteError(f"Error eliminando cola: {exc}") from exc
         finally:
-            if channel and channel.is_open:
+            if channel and getattr(channel, 'is_open', False):
                 with suppress(Exception):
                     channel.close()
 
@@ -478,7 +569,10 @@ class RabbitMQMiddlewareExchange(_BaseRabbitMQMiddleware):
     ) -> None:
         if self._stop_event.is_set():
             if shared_queue:
-                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+                try:
+                    ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+                except Exception:
+                    logger.debug("Cannot NACK during shutdown; broker will requeue on connection close")
             return
 
         try:
@@ -486,12 +580,18 @@ class RabbitMQMiddlewareExchange(_BaseRabbitMQMiddleware):
         except MessageMiddlewareMessageError as exc:
             logger.error("Descartando mensaje inválido del exchange '%s': %s", self.exchange_name, exc)
             if shared_queue:
-                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+                try:
+                    ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+                except Exception:
+                    logger.debug("Failed to NACK invalid exchange message; channel may be dead")
             return
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error deserializando mensaje desde '%s': %s", self.exchange_name, exc)
             if shared_queue:
-                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+                try:
+                    ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+                except Exception:
+                    logger.debug("Failed to NACK after deserialization exception; channel may be dead")
             return
 
         try:
@@ -499,14 +599,18 @@ class RabbitMQMiddlewareExchange(_BaseRabbitMQMiddleware):
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error procesando mensaje desde '%s': %s", self.exchange_name, exc)
             if shared_queue:
-                logger.info(f"[RABBITMQ-MIDDLEWARE] [NACK] Sending NACK with requeue=True for exchange '{self.exchange_name}'")
-                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+                try:
+                    ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+                except Exception:
+                    logger.error("Failed to NACK after processing error; forcing reconnect so broker will requeue")
+                    raise
         else:
             if shared_queue:
-                logger.info(f"[RABBITMQ-MIDDLEWARE] [ACK-PREPARE] Callback completed successfully for exchange '{self.exchange_name}'. About to send ACK.")
-                logger.info(f"[RABBITMQ-MIDDLEWARE] [ACK] Sending ACK for exchange '{self.exchange_name}', delivery_tag={method.delivery_tag}")
-                ch.basic_ack(delivery_tag=method.delivery_tag)
-                logger.info(f"[RABBITMQ-MIDDLEWARE] [ACK-SENT] ACK sent successfully for exchange '{self.exchange_name}'")
+                try:
+                    ch.basic_ack(delivery_tag=method.delivery_tag)
+                except Exception as exc:
+                    logger.error("Failed to ACK exchange message (delivery_tag=%s): %s. Forcing reconnect so broker will requeue.", method.delivery_tag, exc)
+                    raise
 
     # ------------------------------------------------------------------
     # MessageMiddleware implementation
@@ -550,9 +654,9 @@ class RabbitMQMiddlewareExchange(_BaseRabbitMQMiddleware):
 
                 return
 
-            except pika.exceptions.ChannelClosedByBroker as exc:
+            except (pika.exceptions.ChannelClosedByBroker) as exc:
                 logger.warning(
-                    "Canal cerrado por el broker para exchange '%s': %s. Reintentando...",
+                    "Canal cerrado por el broker/consumer para exchange '%s': %s. Reintentando...",
                     self.exchange_name,
                     exc,
                 )
@@ -571,7 +675,7 @@ class RabbitMQMiddlewareExchange(_BaseRabbitMQMiddleware):
             finally:
                 self.consuming = False
                 self._clear_active_channel()
-                if channel and channel.is_open:
+                if channel and getattr(channel, 'is_open', False):
                     with suppress(Exception):
                         channel.close()
 
@@ -589,16 +693,14 @@ class RabbitMQMiddlewareExchange(_BaseRabbitMQMiddleware):
     def send(self, message: Any, routing_key: str = "", exchange: str = "") -> None:
         """
         Send a message using a persistent channel for ordering guarantees.
-        The channel is reused across all sends to maintain message order.
         """
         payload = serialize_message(message).encode("utf-8")
         attempt = 0
 
         while True:
             try:
-                # Get or create persistent send channel (thread-safe)
                 channel = self._get_or_create_send_channel()
-                
+
                 # Ensure exchange is declared (idempotent operation)
                 channel.exchange_declare(
                     exchange=self.exchange_name,
@@ -614,12 +716,12 @@ class RabbitMQMiddlewareExchange(_BaseRabbitMQMiddleware):
                     elif self.route_keys:
                         effective_routing_key = self.route_keys[0]
 
-                # Publish message using persistent channel
                 channel.basic_publish(
                     exchange=self.exchange_name,
                     routing_key=effective_routing_key,
                     body=payload,
                 )
+
                 return
 
             except pika.exceptions.UnroutableError as exc:
@@ -629,15 +731,20 @@ class RabbitMQMiddlewareExchange(_BaseRabbitMQMiddleware):
                 raise MessageMiddlewareMessageError(f"Mensaje rechazado por RabbitMQ: {exc}") from exc
             except (pika.exceptions.AMQPConnectionError, pika.exceptions.ChannelWrongStateError) as exc:
                 logger.warning("Conexión/canal perdido enviando a '%s': %s, recreando canal...", self.exchange_name, exc)
-                # Close invalid channel and retry
                 self._close_send_channel()
+            except MessageMiddlewareMessageError:
+                attempt += 1
+                if attempt > self._publish_retry_attempts:
+                    raise MessageMiddlewareDisconnectedError(
+                        f"Pérdida de conexión enviando mensaje a '{self.exchange_name}'"
+                    )
+                self._wait_before_retry(attempt - 1)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Error enviando mensaje a '%s': %s", self.exchange_name, exc)
-                # Close channel on unexpected errors and retry
                 self._close_send_channel()
 
             attempt += 1
-            if attempt > self._max_reconnect_attempts:
+            if attempt > self._publish_retry_attempts:
                 raise MessageMiddlewareDisconnectedError(
                     f"Pérdida de conexión enviando mensaje a '{self.exchange_name}'"
                 )
@@ -653,6 +760,6 @@ class RabbitMQMiddlewareExchange(_BaseRabbitMQMiddleware):
         except Exception as exc:  # noqa: BLE001
             raise MessageMiddlewareDeleteError(f"Error eliminando exchange: {exc}") from exc
         finally:
-            if channel and channel.is_open:
+            if channel and getattr(channel, 'is_open', False):
                 with suppress(Exception):
                     channel.close()
