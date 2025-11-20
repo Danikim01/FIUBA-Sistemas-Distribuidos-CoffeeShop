@@ -457,6 +457,125 @@ def test_temp_file_cleanup():
     cleanup_test_dir()
 
 
+def test_duplicate_detection():
+    """Test 10: Duplicate message detection using UUIDs."""
+    logger.info("=" * 60)
+    logger.info("TEST 10: Duplicate message detection")
+    logger.info("=" * 60)
+    
+    cleanup_test_dir()
+    
+    state_manager = TPVStateManager(
+        state_dir=TEST_STATE_DIR,
+        worker_id="test-10"
+    )
+    
+    client_id: ClientId = "client-001"
+    message_uuid_1 = "uuid-msg-001"
+    message_uuid_2 = "uuid-msg-002"
+    
+    # Initially, no message has been processed
+    assert state_manager.get_last_processed_message(client_id) is None, \
+        "Initially, no message should be processed"
+    
+    # Process first message
+    state_manager.set_last_processed_message(client_id, message_uuid_1)
+    state_manager.state_data[client_id]["2024-H1"][1] = 100.0
+    state_manager.persist_state(client_id)
+    
+    # Verify first message is recorded
+    assert state_manager.get_last_processed_message(client_id) == message_uuid_1, \
+        "First message UUID should be recorded"
+    
+    # Simulate duplicate detection: check if same UUID is detected as duplicate
+    last_uuid = state_manager.get_last_processed_message(client_id)
+    is_duplicate_1 = (last_uuid == message_uuid_1)
+    assert is_duplicate_1, \
+        "Same UUID should be detected as duplicate"
+    
+    # Process a different message (not a duplicate)
+    state_manager.set_last_processed_message(client_id, message_uuid_2)
+    state_manager.state_data[client_id]["2024-H1"][2] = 200.0
+    state_manager.persist_state(client_id)
+    
+    # Verify new message is recorded
+    assert state_manager.get_last_processed_message(client_id) == message_uuid_2, \
+        "New message UUID should be recorded"
+    
+    # Verify old UUID is no longer the last processed (duplicate detection should work)
+    last_uuid = state_manager.get_last_processed_message(client_id)
+    is_duplicate_old = (last_uuid == message_uuid_1)
+    assert not is_duplicate_old, \
+        "Old UUID should not be detected as duplicate (new message was processed)"
+    
+    # Verify new UUID is not a duplicate
+    is_duplicate_new = (last_uuid == message_uuid_2)
+    assert is_duplicate_new, \
+        "Current UUID should match the last processed message"
+    
+    # Test persistence: reload and verify duplicate detection still works
+    state_manager2 = TPVStateManager(
+        state_dir=TEST_STATE_DIR,
+        worker_id="test-10"
+    )
+    
+    # After reload, should still detect message_uuid_2 as the last processed
+    assert state_manager2.get_last_processed_message(client_id) == message_uuid_2, \
+        "After reload, last processed UUID should be preserved"
+    
+    # Try to process message_uuid_2 again (should be detected as duplicate)
+    last_uuid_reloaded = state_manager2.get_last_processed_message(client_id)
+    is_duplicate_after_reload = (last_uuid_reloaded == message_uuid_2)
+    assert is_duplicate_after_reload, \
+        "After reload, same UUID should still be detected as duplicate"
+    
+    # Try to process message_uuid_1 again (should NOT be duplicate, it's an old message)
+    is_duplicate_old_after_reload = (last_uuid_reloaded == message_uuid_1)
+    assert not is_duplicate_old_after_reload, \
+        "Old UUID should not be detected as duplicate after processing newer message"
+    
+    # Process a new message after reload
+    message_uuid_3 = "uuid-msg-003"
+    state_manager2.set_last_processed_message(client_id, message_uuid_3)
+    state_manager2.persist_state(client_id)
+    
+    # Verify new message is recorded
+    assert state_manager2.get_last_processed_message(client_id) == message_uuid_3, \
+        "New message after reload should be recorded"
+    
+    # Test multiple clients with different UUIDs
+    client_id_2: ClientId = "client-002"
+    message_uuid_client2 = "uuid-client2-001"
+    
+    state_manager2.set_last_processed_message(client_id_2, message_uuid_client2)
+    state_manager2.state_data[client_id_2]["2024-H1"][1] = 300.0
+    state_manager2.persist_state(client_id_2)
+    
+    # Verify each client has its own UUID tracking
+    assert state_manager2.get_last_processed_message(client_id) == message_uuid_3, \
+        "Client 1 should have its own UUID"
+    assert state_manager2.get_last_processed_message(client_id_2) == message_uuid_client2, \
+        "Client 2 should have its own UUID"
+    
+    # Verify duplicate detection works independently for each client
+    # Client 1: message_uuid_3 is duplicate, message_uuid_client2 is not
+    last_uuid_client1 = state_manager2.get_last_processed_message(client_id)
+    assert (last_uuid_client1 == message_uuid_3), \
+        "Client 1's last UUID should be message_uuid_3"
+    assert not (last_uuid_client1 == message_uuid_client2), \
+        "Client 1 should not detect Client 2's UUID as duplicate"
+    
+    # Client 2: message_uuid_client2 is duplicate, message_uuid_3 is not
+    last_uuid_client2 = state_manager2.get_last_processed_message(client_id_2)
+    assert (last_uuid_client2 == message_uuid_client2), \
+        "Client 2's last UUID should be message_uuid_client2"
+    assert not (last_uuid_client2 == message_uuid_3), \
+        "Client 2 should not detect Client 1's UUID as duplicate"
+    
+    logger.info("✓ TEST 10 PASSED: Duplicate detection works correctly")
+    cleanup_test_dir()
+
+
 def run_all_tests():
     """Run all tests."""
     logger.info("\n" + "=" * 60)
@@ -473,6 +592,7 @@ def run_all_tests():
         test_empty_state_handling,
         test_crash_recovery,
         test_temp_file_cleanup,
+        test_duplicate_detection,
     ]
     
     passed = 0

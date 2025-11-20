@@ -25,12 +25,14 @@ class StateManager(Generic[T]):
     
     Instead of persisting the entire state in a single file, this manager:
     - Persists each client's state in a separate file
-    - Maintains a metadata file for message UUIDs
+    - Stores message UUIDs directly in each client's file (no separate metadata file)
     - Only persists clients that have been modified
     - Provides atomic writes per client
     
     This approach scales much better when dealing with many clients,
     as it avoids rewriting the entire state when only one client changes.
+    The UUID is stored in the client file itself to ensure atomicity - if the worker
+    crashes after persisting the client state, the UUID is still available for duplicate detection.
     """
     
     def __init__(self, 
@@ -61,15 +63,10 @@ class StateManager(Generic[T]):
         else:
             self._state_dir = Path(f"state/{worker_type}-{worker_id}")
         
-        # Metadata file for message UUIDs
-        self._metadata_path = self._state_dir / "metadata.json"
-        self._metadata_backup_path = self._state_dir / "metadata.backup.json"
-        self._metadata_temp_path = self._state_dir / "metadata.temp.json"
-        
         # Track modified clients to optimize persistence
         self._modified_clients: Set[ClientId] = set()
         
-        # Last processed message UUIDs (stored in metadata)
+        # Last processed message UUIDs (cached in memory, stored in client files)
         self._last_processed_message: Dict[ClientId, str] = {}
         
         self._ensure_state_dir()
@@ -103,13 +100,6 @@ class StateManager(Generic[T]):
             except Exception as exc:
                 logger.warning("[CLEANUP] Failed to remove temp file %s: %s", temp_file, exc)
         
-        # Also clean up metadata temp file
-        if self._metadata_temp_path.exists():
-            try:
-                logger.warning("[CLEANUP] Removing leftover metadata temp file: %s", self._metadata_temp_path)
-                self._metadata_temp_path.unlink()
-            except Exception as exc:
-                logger.warning("[CLEANUP] Failed to remove metadata temp file: %s", exc)
     
     def _get_client_state_path(self, client_id: ClientId) -> Path:
         """Get the path for a client's state file."""
@@ -119,78 +109,27 @@ class StateManager(Generic[T]):
         return self._state_dir / f"client_{safe_client_id}.json"
     
     def _load_state(self) -> None:
-        """Load state from disk - loads metadata and client states."""
-        # Load metadata first
-        self._load_metadata()
-        
-        # Load client states (lazy loading - only when accessed)
+        """Load state from disk - loads client states and UUIDs from client files."""
+        # Load client states (UUIDs are loaded from client files, not a separate metadata file)
         # For now, we'll load all client states on startup
         # In production, you might want to implement lazy loading
         self._load_all_client_states()
     
     def _load_metadata(self) -> None:
         """
-        Load metadata (message UUIDs) from disk.
+        Load metadata (message UUIDs) from client files.
         
-        Recovery strategy:
-        1. Try main metadata file first
-        2. If corrupted, try backup file
-        3. If both corrupted, start with empty metadata
+        This method is called during _load_all_client_states() to extract UUIDs
+        from client files. UUIDs are no longer stored in a separate metadata file
+        to ensure atomicity - if the worker crashes after persisting a client state,
+        the UUID is still available in the client file.
+        
+        Note: This method is kept for backwards compatibility but UUIDs are now
+        loaded directly from client files in _load_all_client_states().
         """
-        # Try main file first
-        if self._metadata_path.exists():
-            try:
-                with self._metadata_path.open('r', encoding='utf-8') as f:
-                    raw = json.load(f)
-                
-                if not isinstance(raw, dict):
-                    raise ValueError("Metadata file is not a JSON object")
-                
-                uuids = raw.get('uuids', {})
-                checksum = raw.get('checksum')
-                
-                payload = {'uuids': uuids}
-                if checksum != self._compute_checksum(payload):
-                    logger.warning("[LOAD-METADATA] Checksum mismatch in main file, trying backup")
-                    raise ValueError("Checksum mismatch in metadata")
-                
-                if isinstance(uuids, dict):
-                    self._last_processed_message = dict(uuids)
-                    logger.info("[LOAD-METADATA] Loaded metadata from %s with %d client UUIDs", 
-                               self._metadata_path, len(uuids))
-                    return
-            except (json.JSONDecodeError, ValueError, KeyError, OSError) as exc:
-                logger.warning("[LOAD-METADATA] [FAILED] Failed to load metadata from %s: %s", 
-                             self._metadata_path, exc)
-        
-        # Try backup file
-        if self._metadata_backup_path.exists():
-            try:
-                logger.info("[LOAD-METADATA] [RECOVERY] Attempting to recover metadata from backup")
-                with self._metadata_backup_path.open('r', encoding='utf-8') as f:
-                    raw = json.load(f)
-                
-                if not isinstance(raw, dict):
-                    raise ValueError("Backup metadata file is not a JSON object")
-                
-                uuids = raw.get('uuids', {})
-                checksum = raw.get('checksum')
-                
-                payload = {'uuids': uuids}
-                if checksum == self._compute_checksum(payload):
-                    # Backup is valid, restore from it
-                    self._last_processed_message = dict(uuids)
-                    # Restore backup as main file
-                    os.replace(self._metadata_backup_path, self._metadata_path)
-                    logger.info("[LOAD-METADATA] [RECOVERY] Successfully recovered metadata from backup with %d client UUIDs", 
-                              len(uuids))
-                    return
-                else:
-                    logger.error("[LOAD-METADATA] [RECOVERY] Backup metadata file also corrupted")
-            except Exception as exc:
-                logger.error("[LOAD-METADATA] [RECOVERY] Failed to recover metadata from backup: %s", exc)
-        
-        logger.info("[LOAD-METADATA] No valid metadata found, starting with empty metadata")
+        # UUIDs are now loaded from client files, not a separate metadata file
+        # This method is kept for backwards compatibility but does nothing
+        pass
     
     def _load_all_client_states(self) -> None:
         """
@@ -251,12 +190,11 @@ class StateManager(Generic[T]):
                 # Restore client state (subclass should handle this)
                 self._restore_client_state_from_map(client_id, state_section)
                 
-                # CRITICAL: Also restore UUID from client file if metadata doesn't have it
-                # This handles the case where client state was persisted but metadata wasn't
-                if last_uuid and client_id not in self._last_processed_message:
-                    logger.info("[LOAD-STATE] Restoring UUID %s for client %s from client file (metadata missing)", 
-                              last_uuid, client_id)
+                # CRITICAL: Restore UUID from client file (UUIDs are now stored only in client files)
+                if last_uuid:
                     self._last_processed_message[client_id] = last_uuid
+                    logger.debug("[LOAD-STATE] Restored UUID %s for client %s from client file", 
+                              last_uuid, client_id)
                 
                 loaded_count += 1
                 
@@ -291,11 +229,11 @@ class StateManager(Generic[T]):
                             logger.info("[LOAD-STATE] [RECOVERY] Successfully recovered client %s from backup", 
                                       backup_client_id)
                             
-                            # Also restore UUID from backup if metadata doesn't have it
-                            if backup_last_uuid and backup_client_id not in self._last_processed_message:
-                                logger.info("[LOAD-STATE] [RECOVERY] Restoring UUID %s for client %s from backup file", 
-                                          backup_last_uuid, backup_client_id)
+                            # Restore UUID from backup file (UUIDs are now stored only in client files)
+                            if backup_last_uuid:
                                 self._last_processed_message[backup_client_id] = backup_last_uuid
+                                logger.debug("[LOAD-STATE] [RECOVERY] Restored UUID %s for client %s from backup file", 
+                                          backup_last_uuid, backup_client_id)
                             
                             loaded_count += 1
                         else:
@@ -332,24 +270,13 @@ class StateManager(Generic[T]):
         
         Args:
             client_id: If provided, persist only this client's state.
-                      If None, persist all modified clients and metadata.
+                      If None, persist all modified clients.
+        
+        Note: UUIDs are stored directly in the client file, not in a separate
+        metadata file. This ensures atomicity - if the worker crashes after
+        persisting the client state, the UUID is still available for duplicate detection.
         """
-        if client_id:
-            # Persist single client
-            self._persist_client_state(client_id)
-            # Also persist metadata if it changed
-            if client_id in self._modified_clients:
-                self._persist_metadata()
-                self._modified_clients.discard(client_id)
-        else:
-            # Persist all modified clients
-            modified = list(self._modified_clients)
-            for cid in modified:
-                self._persist_client_state(cid)
-            self._modified_clients.clear()
-            
-            # Always persist metadata when doing full persistence
-            self._persist_metadata()
+        self._persist_client_state(client_id)
     
     def _persist_client_state(self, client_id: ClientId) -> None:
         """
@@ -360,9 +287,10 @@ class StateManager(Generic[T]):
         2. Validate temp file integrity (checksum)
         3. Atomically replace original with temp file
         
-        CRITICAL: Also includes the last_processed_message_uuid in the client file
-        to ensure atomicity. If the process crashes between persisting client state
-        and metadata, we can still detect duplicates by checking the UUID in the
+        CRITICAL: Includes the last_processed_message_uuid in the client file
+        to ensure atomicity. UUIDs are stored directly in the client file (not in
+        a separate metadata file) so that if the process crashes after persisting
+        the client state, we can still detect duplicates by checking the UUID in the
         client file itself.
         
         If process crashes:
@@ -379,8 +307,8 @@ class StateManager(Generic[T]):
             state_snapshot = self._snapshot_client_state(client_id)
             
             # CRITICAL: Include UUID in client file for atomicity
-            # This ensures we can detect duplicates even if metadata.json
-            # wasn't persisted due to a crash
+            # UUIDs are stored directly in the client file (not in a separate metadata file)
+            # This ensures we can detect duplicates even if the worker crashes
             last_uuid = self._last_processed_message.get(client_id)
             
             # Include client_id and UUID in payload for recovery and duplicate detection
@@ -441,50 +369,15 @@ class StateManager(Generic[T]):
     
     def _persist_metadata(self) -> None:
         """
-        Persist metadata (message UUIDs) atomically.
+        Persist metadata (message UUIDs).
         
-        Uses same two-phase commit approach as client state persistence.
+        NOTE: This method is now a no-op. UUIDs are stored directly in client files
+        to ensure atomicity. If the worker crashes after persisting a client state,
+        the UUID is still available in the client file for duplicate detection.
         """
-        payload = {'uuids': dict(self._last_processed_message)}
-        checksum = self._compute_checksum(payload)
-        serialized = payload | {'checksum': checksum}
-        
-        try:
-            # Phase 1: Write to temp file with fsync
-            with self._metadata_temp_path.open('w', encoding='utf-8') as f:
-                json.dump(serialized, f, ensure_ascii=False, sort_keys=True)
-                f.flush()
-                os.fsync(f.fileno())
-            
-            # Phase 2: Validate temp file integrity
-            try:
-                with self._metadata_temp_path.open('r', encoding='utf-8') as f:
-                    temp_data = json.load(f)
-                
-                temp_payload = {'uuids': temp_data.get('uuids', {})}
-                temp_checksum = temp_data.get('checksum')
-                
-                if temp_checksum != self._compute_checksum(temp_payload):
-                    raise ValueError("Metadata temp file checksum validation failed")
-                    
-            except (json.JSONDecodeError, ValueError, KeyError) as exc:
-                logger.error("[PERSIST-METADATA] [VALIDATION] Temp file validation failed: %s. Aborting persist.", exc)
-                self._metadata_temp_path.unlink()
-                raise ValueError(f"Metadata temp file validation failed: {exc}") from exc
-            
-            # Phase 3: Atomic replace
-            if self._metadata_path.exists():
-                os.replace(self._metadata_path, self._metadata_backup_path)
-            os.replace(self._metadata_temp_path, self._metadata_path)
-            
-            logger.debug("[PERSIST-METADATA] Persisted metadata with %d client UUIDs", 
-                        len(self._last_processed_message))
-            
-        except Exception as exc:
-            logger.error("[PERSIST-METADATA] [ERROR] Failed to persist metadata: %s", exc)
-            with contextlib.suppress(FileNotFoundError):
-                self._metadata_temp_path.unlink()
-            raise
+        # UUIDs are now stored directly in client files, not in a separate metadata file
+        # This method is kept for backwards compatibility but does nothing
+        pass
     
     def mark_client_modified(self, client_id: ClientId) -> None:
         """Mark a client as modified so it will be persisted."""
@@ -494,16 +387,19 @@ class StateManager(Generic[T]):
         """
         Get the last processed message UUID for a client.
         
-        First checks metadata.json, then falls back to checking the client file itself.
-        This ensures we can detect duplicates even if metadata wasn't persisted due to a crash.
+        Checks the client file directly (UUIDs are stored in client files, not in
+        a separate metadata file). This ensures we can detect duplicates even if
+        the worker crashed after persisting the client state.
+        
+        The result is cached in memory for performance.
         """
-        # First check metadata (fast path)
+        # First check cache (fast path)
         uuid = self._last_processed_message.get(client_id)
         if uuid:
+            logger.debug("[GET-UUID] Found UUID %s for client %s in memory cache", uuid, client_id)
             return uuid
         
-        # Fallback: check client file (handles case where metadata wasn't persisted)
-        # This is slower but ensures correctness
+        # Read from client file (source of truth)
         client_path = self._get_client_state_path(client_id)
         if client_path.exists():
             try:
@@ -511,9 +407,9 @@ class StateManager(Generic[T]):
                     raw = json.load(f)
                 file_uuid = raw.get('last_processed_uuid')
                 if file_uuid:
-                    # Update metadata cache for next time
+                    # Update cache for next time
                     self._last_processed_message[client_id] = file_uuid
-                    logger.debug("[GET-UUID] Found UUID %s for client %s in client file (metadata was missing)", 
+                    logger.debug("[GET-UUID] Found UUID %s for client %s in client file", 
                                file_uuid, client_id)
                     return file_uuid
             except Exception as exc:
