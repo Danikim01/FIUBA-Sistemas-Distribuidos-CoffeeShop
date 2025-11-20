@@ -1,10 +1,13 @@
 import os
 import logging
 from filter_worker import FilterWorker
-from typing import Any
+from typing import Any, Union
 from worker_utils import run_main, safe_float_conversion
 from workers.filter.filter_worker import FilterWorker
-
+from common.models import (
+    Transaction,
+    TransactionItem,
+)
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,7 +24,7 @@ class AmountFilterWorker(FilterWorker):
         self.min_amount = safe_float_conversion(os.getenv('MIN_AMOUNT', '75.0'))
         logger.info(f"AmountFilterWorker configured with min_amount: {self.min_amount}")
     
-    def apply_filter(self, item: Any) -> bool:
+    def apply_filter(self, item: Union[Transaction, TransactionItem]) -> bool:
         try:
             final_amount = safe_float_conversion(item.get('final_amount'))
             return final_amount >= self.min_amount

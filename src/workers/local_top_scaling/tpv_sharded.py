@@ -64,7 +64,7 @@ class ShardedTPVWorker(AggregatorWorker):
         self.worker_id = int(os.getenv('WORKER_ID', '0'))
         
         # Setup file logging for this worker
-        setup_file_logging(self.worker_id)
+        #setup_file_logging(self.worker_id)
         
         # Validate worker_id is within shard range
         if self.worker_id >= self.num_shards:
@@ -295,8 +295,11 @@ class ShardedTPVWorker(AggregatorWorker):
                 
                 # Send EOF directly to output WITHOUT consensus mechanism
                 # This is the key change: sharded workers send EOF directly to aggregator
-                logger.info(f"[EOF] [SHARDED-WORKER] Sending EOF directly to TPV aggregator for client {client_id} (no consensus)")
-                self.eof_handler.output_eof(client_id=client_id)
+                # Extract and propagate sequence_id from the received EOF message
+                from workers.utils.message_utils import extract_sequence_id
+                sequence_id = extract_sequence_id(message)
+                logger.info(f"[EOF] [SHARDED-WORKER] Sending EOF directly to TPV aggregator for client {client_id} (no consensus), sequence_id: {sequence_id}")
+                self.eof_handler.output_eof(client_id=client_id, sequence_id=sequence_id)
                 
             except Exception:
                 raise

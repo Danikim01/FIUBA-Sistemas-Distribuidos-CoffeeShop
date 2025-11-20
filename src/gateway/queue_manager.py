@@ -3,7 +3,7 @@
 import logging
 import queue
 import threading
-from typing import List, Any
+from typing import List, Any, Union
 from contextlib import suppress
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue
 from middleware.thread_aware_publishers import ThreadAwareExchangePublisher, ThreadAwareQueuePublisher
@@ -13,6 +13,16 @@ from workers.utils.sharding_utils import (
     get_routing_key_for_item,
     extract_store_id_from_payload,
     extract_item_id_from_payload
+)
+from common.models import (
+    ChunkedDataMessage,
+    DataMessage,
+    EOFMessage,
+    MenuItem,
+    Store,
+    Transaction,
+    TransactionItem,
+    User,
 )
 
 logger = logging.getLogger(__name__)
@@ -114,6 +124,10 @@ class QueueManager:
     def __init__(self, config: GatewayConfig):
         self.config = config
         
+        # Batch counters for sequence ID generation per client
+        self._batch_counters: dict[str, int] = {}
+        self._batch_counters_lock = threading.Lock()
+        
         # Initialize all queue connections
         self._init_queues()
         
@@ -187,7 +201,7 @@ class QueueManager:
             expected_eofs=self.config.results_expected,
         )
     
-    def send_transactions_chunks(self, transactions: List[Any], client_id: str) -> None:
+    def send_transactions_chunks(self, transactions: List[Transaction], client_id: str) -> None:
         """Send transactions in chunks to the sharded exchange with client metadata.
         
         Each transaction is sharded by store_id to ensure consistent routing.
@@ -199,6 +213,10 @@ class QueueManager:
             replica_count = self.config.filter_replica_count
             
             for i, chunk in enumerate(chunks):
+                # Get batch number and generate sequence_id for this batch
+                batch_num = self._get_next_batch_num(client_id)
+                sequence_id = self._generate_sequence_id(client_id, batch_num)
+                
                 # Shard transactions within chunk by store_id
                 sharded_chunks = {}
                 for transaction in chunk:
@@ -223,16 +241,17 @@ class QueueManager:
                 
                 # Send each sharded chunk to its routing key
                 for routing_key, sharded_chunk in sharded_chunks.items():
-                    message_with_metadata = {
+                    message_with_metadata: ChunkedDataMessage = {
                         'client_id': client_id,
                         'data': sharded_chunk,
                         'chunk_index': i,
-                        'total_chunks': len(chunks)
+                        'total_chunks': len(chunks),
+                        'sequence_id': sequence_id
                     }
                     self.transactions_exchange.send(message_with_metadata, routing_key=routing_key)
                     logger.debug(
                         f"Sent chunk {i+1}/{len(chunks)} with {len(sharded_chunk)} transactions "
-                        f"to {routing_key} for client {client_id}"
+                        f"to {routing_key} for client {client_id}, sequence_id: {sequence_id}"
                     )
             
             logger.debug(f"Sent {len(chunks)} chunks with {len(transactions)} total transactions for client {client_id}")
@@ -240,37 +259,47 @@ class QueueManager:
             logger.error(f"Error sending transaction chunks to RabbitMQ for client {client_id}: {e}")
             raise
     
-    def send_stores(self, stores: List[Any], client_id: str) -> None:
+    def send_stores(self, stores: List[Store], client_id: str) -> None:
         """Send stores to all configured stores queues with client metadata."""
         logger.info("Processing %s stores for pipelines for client %s", len(stores), client_id)
         
         try:
-            message_with_metadata = {
+            # Get batch number and generate sequence_id
+            batch_num = self._get_next_batch_num(client_id)
+            sequence_id = self._generate_sequence_id(client_id, batch_num)
+            
+            message_with_metadata: DataMessage = {
                 'client_id': client_id,
-                'data': stores
+                'data': stores,
+                'sequence_id': sequence_id
             }
             self.stores_exchange.send(message_with_metadata)
-            logger.info("Sent %s stores to exchange %s for client %s", len(stores), self.config.stores_exchange_name, client_id)
+            logger.info("Sent %s stores to exchange %s for client %s, sequence_id: %s", len(stores), self.config.stores_exchange_name, client_id, sequence_id)
         except Exception as e:
             logger.error("Error sending stores to RabbitMQ (%s) for client %s: %s", self.config.stores_exchange_name, client_id, e)
             raise
     
-    def send_users(self, users: List[Any], client_id: str) -> None:
+    def send_users(self, users: List[User], client_id: str) -> None:
         """Send users to the users processing queue with client metadata."""
         logger.debug("Processing %s users for client pipeline for client %s", len(users), client_id)
         
         try:
-            message_with_metadata = {
+            # Get batch number and generate sequence_id
+            batch_num = self._get_next_batch_num(client_id)
+            sequence_id = self._generate_sequence_id(client_id, batch_num)
+            
+            message_with_metadata: DataMessage = {
                 'client_id': client_id,
-                'data': users
+                'data': users,
+                'sequence_id': sequence_id
             }
             self.users_queue.send(message_with_metadata)
-            logger.debug("Sent %s users to queue %s for client %s", len(users), self.config.users_queue_name, client_id)
+            logger.debug("Sent %s users to queue %s for client %s, sequence_id: %s", len(users), self.config.users_queue_name, client_id, sequence_id)
         except Exception as e:
             logger.error(f"Error sending users to RabbitMQ for client {client_id}: {e}")
             raise
     
-    def send_transaction_items_chunks(self, transaction_items: List[Any], client_id: str) -> None:
+    def send_transaction_items_chunks(self, transaction_items: List[TransactionItem], client_id: str) -> None:
         """Send transaction items in chunks to the sharded exchange with client metadata.
         
         Each transaction item is sharded by item_id to ensure consistent routing.
@@ -288,6 +317,10 @@ class QueueManager:
             replica_count = self.config.filter_replica_count
 
             for i, chunk in enumerate(chunks):
+                # Get batch number and generate sequence_id for this batch
+                batch_num = self._get_next_batch_num(client_id)
+                sequence_id = self._generate_sequence_id(client_id, batch_num)
+                
                 # Shard transaction items within chunk by item_id
                 sharded_chunks = {}
                 for item in chunk:
@@ -312,36 +345,43 @@ class QueueManager:
                 
                 # Send each sharded chunk to its routing key
                 for routing_key, sharded_chunk in sharded_chunks.items():
-                    message_with_metadata = {
+                    message_with_metadata: ChunkedDataMessage = {
                         'client_id': client_id,
                         'data': sharded_chunk,
                         'chunk_index': i,
-                        'total_chunks': len(chunks)
+                        'total_chunks': len(chunks),
+                        'sequence_id': sequence_id
                     }
                     self.transaction_items_exchange.send(message_with_metadata, routing_key=routing_key)
                     logger.debug(
-                        "Sent chunk %s/%s with %s transaction items to %s for client %s",
+                        "Sent chunk %s/%s with %s transaction items to %s for client %s, sequence_id: %s",
                         i + 1,
                         len(chunks),
                         len(sharded_chunk),
                         routing_key,
-                        client_id
+                        client_id,
+                        sequence_id
                     )
         except Exception as e:
             logger.error(f"Error sending transaction items to RabbitMQ for client {client_id}: {e}")
             raise
     
-    def send_menu_items(self, menu_items: List[Any], client_id: str) -> None:
+    def send_menu_items(self, menu_items: List[MenuItem], client_id: str) -> None:
         """Send menu items to the aggregation queue with client metadata."""
         logger.info(f"Processing {len(menu_items)} menu items for aggregation for client {client_id}")
         
         try:
-            message_with_metadata = {
+            # Get batch number and generate sequence_id
+            batch_num = self._get_next_batch_num(client_id)
+            sequence_id = self._generate_sequence_id(client_id, batch_num)
+            
+            message_with_metadata: DataMessage = {
                 'client_id': client_id,
-                'data': menu_items
+                'data': menu_items,
+                'sequence_id': sequence_id
             }
             self.menu_items_queue.send(message_with_metadata)
-            logger.info("Menu items sent to queue %s for client %s", self.config.menu_items_queue_name, client_id)
+            logger.info("Menu items sent to queue %s for client %s, sequence_id: %s", self.config.menu_items_queue_name, client_id, sequence_id)
         except Exception as e:
             logger.error(f"Error sending menu items to RabbitMQ for client {client_id}: {e}")
             raise
@@ -350,21 +390,31 @@ class QueueManager:
         """Propagate EOF message to transactions processing pipeline with client metadata.
         
         Sends EOF to each routing key (shard_0, shard_1, shard_2) so each filter worker receives one.
+        CRITICAL: Generate sequence_id ONCE before the loop to ensure all Filter Workers receive the same sequence_id.
         """
         try:
             replica_count = self.config.filter_replica_count
-            eof_message = {
+            
+            # Generate sequence_id ONCE before the loop (CRITICAL for consistency)
+            last_batch_num = self._get_last_batch_num(client_id)
+            eof_batch_num = last_batch_num + 1
+            sequence_id = self._generate_sequence_id(client_id, eof_batch_num)
+            
+            # Create EOF message with sequence_id BEFORE the loop
+            eof_message: EOFMessage = {
                 'client_id': client_id,
                 'type': 'EOF',
-                'data_type': 'TRANSACTIONS'
+                'data_type': 'TRANSACTIONS',
+                'sequence_id': sequence_id
             }
-            # Send EOF to each routing key (one per replica)
+            
+            # Send the SAME eof_message (with same sequence_id) to each routing key
             for i in range(replica_count):
                 routing_key = f"shard_{i}"
                 self.transactions_exchange.send(eof_message, routing_key=routing_key)
             logger.info(
-                "Propagated %d EOFs to transactions exchange for client %s (one per routing key)",
-                replica_count, client_id
+                "Propagated %d EOFs to transactions exchange for client %s (one per routing key), sequence_id: %s",
+                replica_count, client_id, sequence_id
             )
         except Exception as exc:
             logger.error(f"Failed to propagate EOF to transactions exchange for client {client_id}: {exc}")
@@ -373,13 +423,19 @@ class QueueManager:
     def propagate_users_eof(self, client_id: str) -> None:
         """Propagate EOF message to users queue with client metadata."""
         try:
-            eof_message = {
+            # Generate sequence_id for EOF
+            last_batch_num = self._get_last_batch_num(client_id)
+            eof_batch_num = last_batch_num + 1
+            sequence_id = self._generate_sequence_id(client_id, eof_batch_num)
+            
+            eof_message: EOFMessage = {
                 'client_id': client_id,
                 'type': 'EOF',
-                'data_type': 'USERS'
+                'data_type': 'USERS',
+                'sequence_id': sequence_id
             }
             self.users_queue.send(eof_message)
-            logger.info("Propagated EOF to users queue for client %s", client_id)
+            logger.info("Propagated EOF to users queue for client %s, sequence_id: %s", client_id, sequence_id)
         except Exception as exc:
             logger.error(f"Failed to propagate EOF to users queue for client {client_id}: {exc}")
             raise
@@ -387,13 +443,19 @@ class QueueManager:
     def propagate_stores_eof(self, client_id: str) -> None:
         """Propagate EOF message to all stores queues with client metadata."""
         try:
-            eof_message = {
+            # Generate sequence_id for EOF
+            last_batch_num = self._get_last_batch_num(client_id)
+            eof_batch_num = last_batch_num + 1
+            sequence_id = self._generate_sequence_id(client_id, eof_batch_num)
+            
+            eof_message: EOFMessage = {
                 'client_id': client_id,
                 'type': 'EOF',
-                'data_type': 'STORES'
+                'data_type': 'STORES',
+                'sequence_id': sequence_id
             }
             self.stores_exchange.send(eof_message)
-            logger.info("Propagated EOF to stores exchange %s for client %s", self.config.stores_exchange_name, client_id)
+            logger.info("Propagated EOF to stores exchange %s for client %s, sequence_id: %s", self.config.stores_exchange_name, client_id, sequence_id)
         except Exception as exc:
             logger.error("Failed to propagate EOF to stores exchange %s for client %s: %s", self.config.stores_exchange_name, client_id, exc)
     
@@ -401,21 +463,31 @@ class QueueManager:
         """Propagate EOF message to transaction items exchange with client metadata.
         
         Sends EOF to each routing key (shard_0, shard_1, shard_2) so each filter worker receives one.
+        CRITICAL: Generate sequence_id ONCE before the loop to ensure all Filter Workers receive the same sequence_id.
         """
         try:
             replica_count = self.config.filter_replica_count
-            eof_message = {
+            
+            # Generate sequence_id ONCE before the loop (CRITICAL for consistency)
+            last_batch_num = self._get_last_batch_num(client_id)
+            eof_batch_num = last_batch_num + 1
+            sequence_id = self._generate_sequence_id(client_id, eof_batch_num)
+            
+            # Create EOF message with sequence_id BEFORE the loop
+            eof_message: EOFMessage = {
                 'client_id': client_id,
                 'type': 'EOF',
-                'data_type': 'TRANSACTION_ITEMS'
+                'data_type': 'TRANSACTION_ITEMS',
+                'sequence_id': sequence_id
             }
-            # Send EOF to each routing key (one per replica)
+            
+            # Send the SAME eof_message (with same sequence_id) to each routing key
             for i in range(replica_count):
                 routing_key = f"shard_{i}"
                 self.transaction_items_exchange.send(eof_message, routing_key=routing_key)
             logger.info(
-                "Propagated %d EOFs to transaction items exchange for client %s (one per routing key)",
-                replica_count, client_id
+                "Propagated %d EOFs to transaction items exchange for client %s (one per routing key), sequence_id: %s",
+                replica_count, client_id, sequence_id
             )
         except Exception as exc:
             logger.error(f"Failed to propagate EOF to transaction items exchange for client {client_id}: {exc}")
@@ -428,13 +500,19 @@ class QueueManager:
     def propagate_menu_items_eof(self, client_id: str) -> None:
         """Propagate EOF message to menu items queue with client metadata."""
         try:
-            eof_message = {
+            # Generate sequence_id for EOF
+            last_batch_num = self._get_last_batch_num(client_id)
+            eof_batch_num = last_batch_num + 1
+            sequence_id = self._generate_sequence_id(client_id, eof_batch_num)
+            
+            eof_message: EOFMessage = {
                 'client_id': client_id,
                 'type': 'EOF',
-                'data_type': 'MENU_ITEMS'
+                'data_type': 'MENU_ITEMS',
+                'sequence_id': sequence_id
             }
             self.menu_items_queue.send(eof_message)
-            logger.info("Propagated EOF to menu items queue for client %s", client_id)
+            logger.info("Propagated EOF to menu items queue for client %s, sequence_id: %s", client_id, sequence_id)
         except Exception as exc:
             logger.error(f"Failed to propagate EOF to menu items queue for client {client_id}: {exc}")
             raise
@@ -466,8 +544,57 @@ class QueueManager:
             **connection_params
         )
     
+    def _get_next_batch_num(self, client_id: str) -> int:
+        """Get and increment the next batch number for a client.
+        
+        Args:
+            client_id: Client identifier
+            
+        Returns:
+            Next batch number (1-indexed)
+        """
+        with self._batch_counters_lock:
+            if client_id not in self._batch_counters:
+                self._batch_counters[client_id] = 0
+            self._batch_counters[client_id] += 1
+            return self._batch_counters[client_id]
+    
+    def _get_last_batch_num(self, client_id: str) -> int:
+        """Get the last assigned batch number for a client without incrementing.
+        
+        Args:
+            client_id: Client identifier
+            
+        Returns:
+            Last batch number (0 if no batches sent yet)
+        """
+        with self._batch_counters_lock:
+            return self._batch_counters.get(client_id, 0)
+    
+    def _generate_sequence_id(self, client_id: str, batch_num: int) -> str:
+        """Generate sequence ID in format {client_id_sin_guiones}-{batch_num}.
+        
+        Args:
+            client_id: Client identifier (may contain hyphens)
+            batch_num: Batch number
+            
+        Returns:
+            Sequence ID string
+        """
+        client_id_sin_guiones = client_id.replace('-', '')
+        return f"{client_id_sin_guiones}-{batch_num}"
+    
+    def _clear_client_batch_counter(self, client_id: str) -> None:
+        """Clear batch counter for a client.
+        
+        Args:
+            client_id: Client identifier
+        """
+        with self._batch_counters_lock:
+            self._batch_counters.pop(client_id, None)
+    
     @staticmethod
-    def _create_chunks(items: List[Any], chunk_size: int) -> List[List[Any]]:
+    def _create_chunks(items: List[Union[Transaction, TransactionItem, User, Store, MenuItem]], chunk_size: int) -> List[List[Union[Transaction, TransactionItem, User, Store, MenuItem]]]:
         """Divide items into chunks for optimized processing."""
         chunks = []
         for i in range(0, len(items), chunk_size):

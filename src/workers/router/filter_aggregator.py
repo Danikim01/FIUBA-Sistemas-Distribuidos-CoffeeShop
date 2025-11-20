@@ -5,11 +5,12 @@
 import logging
 import os
 import threading
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 from workers.base_worker import BaseWorker
 from workers.utils.worker_utils import run_main
 from workers.utils.message_utils import ClientId, is_eof_message
+from workers.utils.processed_message_store import ProcessedMessageStore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,6 +23,8 @@ class FilterAggregator(BaseWorker):
     
     Forwards data messages immediately without accumulating them in memory.
     When EOF count reaches REPLICA_COUNT, propagates EOF to output.
+    
+    Includes deduplication to handle message retries when workers are killed.
     """
     
     def __init__(self):
@@ -31,6 +34,10 @@ class FilterAggregator(BaseWorker):
         self.end_of_file_received = {}  # {client_id: count}
         self.eof_lock = threading.Lock()
         
+        # Add deduplication support
+        worker_label = f"{self.__class__.__name__}-{os.getenv('WORKER_ID', '0')}"
+        self._processed_store = ProcessedMessageStore(worker_label)
+        
         logger.info(
             f"Filter Aggregator initialized - Input: {self.middleware_config.get_input_target()}, "
             f"Output: {self.middleware_config.get_output_target()}, "
@@ -39,6 +46,40 @@ class FilterAggregator(BaseWorker):
         logger.info(
             f"\033[33m[FILTER-AGGREGATOR] Forwarding messages immediately, aggregating EOFs only\033[0m"
         )
+        logger.info(
+            f"\033[33m[FILTER-AGGREGATOR] Deduplication enabled to handle message retries\033[0m"
+        )
+    
+    def _get_current_message_uuid(self) -> str | None:
+        """Get the message UUID from the current message metadata."""
+        metadata = self._get_current_message_metadata()
+        if not metadata:
+            return None
+        message_uuid = metadata.get("message_uuid")
+        if not message_uuid:
+            return None
+        return str(message_uuid)
+    
+    def _check_duplicate(self, client_id: str) -> Tuple[bool, str | None]:
+        """Check if the current message is a duplicate.
+        
+        Returns:
+            Tuple of (is_duplicate, message_uuid)
+        """
+        message_uuid = self._get_current_message_uuid()
+        if message_uuid and self._processed_store.has_processed(client_id, message_uuid):
+            logger.debug(
+                "[FILTER-AGGREGATOR] Duplicate message %s for client %s detected; skipping processing",
+                message_uuid,
+                client_id,
+            )
+            return True, message_uuid
+        return False, message_uuid
+    
+    def _mark_processed(self, client_id: str, message_uuid: str | None) -> None:
+        """Mark a message as processed."""
+        if message_uuid:
+            self._processed_store.mark_processed(client_id, message_uuid)
     
     def process_message(self, message: Any, client_id: ClientId):
         """
@@ -48,11 +89,19 @@ class FilterAggregator(BaseWorker):
             message: Message data to forward
             client_id: Client identifier
         """
-        # Forward message immediately without accumulating
-        self.send_message(client_id=client_id, data=message)
-        logger.debug(
-            f"[FILTER-AGGREGATOR] Forwarded message immediately for client {client_id}"
-        )
+        # Check for duplicates
+        duplicate, message_uuid = self._check_duplicate(client_id)
+        if duplicate:
+            return
+        
+        try:
+            # Forward message immediately without accumulating
+            self.send_message(client_id=client_id, data=message)
+            logger.debug(
+                f"[FILTER-AGGREGATOR] Forwarded message immediately for client {client_id}"
+            )
+        finally:
+            self._mark_processed(client_id, message_uuid)
     
     def process_batch(self, batch: list, client_id: ClientId):
         """
@@ -62,18 +111,26 @@ class FilterAggregator(BaseWorker):
             batch: List of messages to forward
             client_id: Client identifier
         """
-        # Forward batch immediately without accumulating
-        if isinstance(batch, list) and batch:
-            self.send_message(client_id=client_id, data=batch)
-            logger.debug(
-                f"[FILTER-AGGREGATOR] Forwarded batch of {len(batch)} messages immediately for client {client_id}"
-            )
-        elif batch:
-            # Single message in batch format
-            self.send_message(client_id=client_id, data=batch)
-            logger.debug(
-                f"[FILTER-AGGREGATOR] Forwarded single message immediately for client {client_id}"
-            )
+        # Check for duplicates
+        duplicate, message_uuid = self._check_duplicate(client_id)
+        if duplicate:
+            return
+        
+        try:
+            # Forward batch immediately without accumulating
+            if isinstance(batch, list) and batch:
+                self.send_message(client_id=client_id, data=batch)
+                logger.debug(
+                    f"[FILTER-AGGREGATOR] Forwarded batch of {len(batch)} messages immediately for client {client_id}"
+                )
+            elif batch:
+                # Single message in batch format
+                self.send_message(client_id=client_id, data=batch)
+                logger.debug(
+                    f"[FILTER-AGGREGATOR] Forwarded single message immediately for client {client_id}"
+                )
+        finally:
+            self._mark_processed(client_id, message_uuid)
     
     def handle_eof(self, message: Dict[str, Any], client_id: ClientId):
         """
@@ -113,6 +170,9 @@ class FilterAggregator(BaseWorker):
             # Reset counter for this client
             with self.eof_lock:
                 self.end_of_file_received[client_id] = 0
+            
+            # Clear processed state for this client when all EOFs are received
+            self._processed_store.clear_client(client_id)
     
     def _propagate_eof(self, client_id: ClientId):
         """

@@ -6,9 +6,15 @@ import logging
 import os
 from abc import abstractmethod
 from typing import Any, List, Optional, Tuple
-
+from typing import Union
 from workers.base_worker import BaseWorker
 from workers.utils.processed_message_store import ProcessedMessageStore
+
+from common.models import (
+    EOFMessage,
+    Transaction,
+    TransactionItem,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +29,7 @@ class FilterWorker(BaseWorker):
 
 
     @abstractmethod
-    def apply_filter(self, item: Any) -> bool:
+    def apply_filter(self, item: Union[Transaction, TransactionItem]) -> bool:
         """Apply filter logic to determine if an item should pass through.
         
         Args:
@@ -58,7 +64,7 @@ class FilterWorker(BaseWorker):
         if message_uuid:
             self._processed_store.mark_processed(client_id, message_uuid)
 
-    def process_message(self, message: Any, client_id: str):
+    def process_message(self, message: Union[Transaction, TransactionItem], client_id: str):
         """Process a single message by applying filter.
         
         Args:
@@ -74,7 +80,7 @@ class FilterWorker(BaseWorker):
         finally:
             self._mark_processed(client_id, message_uuid)
 
-    def process_batch(self, batch: List[Any], client_id: str):
+    def process_batch(self, batch: List[Union[Transaction, TransactionItem]], client_id: str):
         """Process a batch by filtering and sending filtered results.
         
         Args:
@@ -91,7 +97,7 @@ class FilterWorker(BaseWorker):
         finally:
             self._mark_processed(client_id, message_uuid)
 
-    def handle_eof(self, message: dict, client_id: str):
+    def handle_eof(self, message: EOFMessage, client_id: str):
         """
         Clear processed state and send EOF to filter aggregator.
         

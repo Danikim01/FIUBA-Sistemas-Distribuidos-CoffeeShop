@@ -15,6 +15,9 @@ COPY middleware ./middleware
 # Copy healthcheck source code preserving package structure
 COPY src/healthcheck /app/src/healthcheck
 
+# Copy common source code preserving package structure
+COPY src/common /app/src/common
+
 # Copy gateway source code
 COPY src/gateway/ .
 

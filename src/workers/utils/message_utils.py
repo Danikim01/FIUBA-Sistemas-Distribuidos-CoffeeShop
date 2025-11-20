@@ -88,3 +88,41 @@ def extract_eof_metadata(message: Dict[str, Any]) -> Dict[str, Any]:
     """
     excluded_fields = {'client_id', 'type', 'data'}
     return {k: v for k, v in message.items() if k not in excluded_fields}
+
+
+def extract_sequence_id(message: Dict[str, Any]) -> Optional[str]:
+    """Extract sequence_id from message metadata.
+    
+    Args:
+        message: Message dictionary that may contain sequence_id in metadata
+        
+    Returns:
+        sequence_id string if found, None otherwise
+    """
+    return message.get('sequence_id')
+
+
+def extract_batch_num_from_sequence_id(sequence_id: str) -> Optional[int]:
+    """Parse batch number from sequence ID string.
+    
+    Sequence ID format: {client_id_sin_guiones}-{batch_num}
+    Example: "abc123def456-42" -> 42
+    
+    Args:
+        sequence_id: Sequence ID string in format {client_id}-{batch_num}
+        
+    Returns:
+        Batch number as integer if parsing succeeds, None otherwise
+    """
+    if not sequence_id:
+        return None
+    
+    try:
+        # Split by last hyphen to get batch number
+        parts = sequence_id.rsplit('-', 1)
+        if len(parts) == 2:
+            return int(parts[1])
+        return None
+    except (ValueError, AttributeError):
+        logger.warning(f"Failed to parse batch number from sequence_id: {sequence_id}")
+        return None

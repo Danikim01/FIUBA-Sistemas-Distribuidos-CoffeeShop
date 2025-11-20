@@ -11,6 +11,7 @@ from middleware_config import MiddlewareConfig # pyright: ignore[reportMissingIm
 from message_utils import ( # pyright: ignore[reportMissingImports]
     ClientId,
     extract_data_and_client_id,
+    extract_sequence_id,
     is_eof_message,
     create_message_with_metadata,
 )
@@ -80,10 +81,24 @@ class BaseWorker(ABC):
     def send_message(self, client_id: ClientId, data: Any, routing_key: str | None = None ,  **metadata):
         """Send a message to the output with client metadata.
         
+        Automatically propagates sequence_id from the current message being processed
+        if it exists and is not explicitly provided in metadata.
+        
         Args:
+            client_id: Client identifier
             data: The actual data to send
+            routing_key: Optional routing key for exchange-based middleware
             **metadata: Additional metadata fields (including routing_key for exchanges)
         """
+        # Propagate sequence_id from current message if not explicitly provided
+        if 'sequence_id' not in metadata:
+            current_metadata = self._get_current_message_metadata()
+            if current_metadata:
+                sequence_id = extract_sequence_id(current_metadata)
+                if sequence_id:
+                    metadata['sequence_id'] = sequence_id
+                    logger.debug(f"[WORKER {self.__class__.__name__}] Propagating sequence_id: {sequence_id}")
+        
         message = create_message_with_metadata(client_id, data, **metadata)
         
         # Send message with routing_key if it's an exchange middleware

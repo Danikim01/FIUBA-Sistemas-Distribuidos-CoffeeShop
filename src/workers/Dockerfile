@@ -12,6 +12,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy middleware
 COPY middleware /app/middleware
 
+# Copy common source code preserving package structure
+COPY src/common /app/src/common
+
 # Copy workers source code preserving the package layout
 COPY src/workers /app/src/workers
 

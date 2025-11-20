@@ -287,8 +287,11 @@ class ShardedItemsWorker(AggregatorWorker):
                     self.send_payload(chunk, client_id)
                 
                 # Send EOF directly to output WITHOUT consensus mechanism
-                logger.info(f"[EOF] [SHARDED-ITEMS-WORKER] Sending EOF directly to Items aggregator for client {client_id} (no consensus)")
-                self.eof_handler.output_eof(client_id=client_id)
+                # Extract and propagate sequence_id from the received EOF message
+                from workers.utils.message_utils import extract_sequence_id
+                sequence_id = extract_sequence_id(message)
+                logger.info(f"[EOF] [SHARDED-ITEMS-WORKER] Sending EOF directly to Items aggregator for client {client_id} (no consensus), sequence_id: {sequence_id}")
+                self.eof_handler.output_eof(client_id=client_id, sequence_id=sequence_id)
                 
             except Exception:
                 raise

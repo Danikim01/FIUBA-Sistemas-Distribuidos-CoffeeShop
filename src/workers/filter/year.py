@@ -3,7 +3,7 @@
 import os
 import logging
 from datetime import datetime
-from typing import Any
+from typing import Any, Union
 
 from filter_worker import FilterWorker
 from worker_utils import run_main
@@ -12,6 +12,10 @@ from worker_utils import run_main
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+from common.models import (
+    Transaction,
+    TransactionItem,
+)
 created_at_field = 'created_at'
 
 class YearFilterWorker(FilterWorker):
@@ -27,7 +31,7 @@ class YearFilterWorker(FilterWorker):
         self.max_year = int(os.getenv('MAX_YEAR', '2025'))
         logger.info(f"TimeFilterWorker configured with time range: {self.min_year} - {self.max_year}")
 
-    def apply_filter(self, item: Any) -> bool:
+    def apply_filter(self, item: Union[Transaction, TransactionItem]) -> bool:
         try:
             # Suponiendo que item es un dict con string ISO8601 en 'created_at'
             created_at = item.get(created_at_field)

@@ -2,11 +2,14 @@
 
 import os
 import logging
-from typing import Any
+from typing import Any, Union
 from datetime import time
 from filter_worker import FilterWorker
 from worker_utils import extract_time_safe, run_main
-
+from common.models import (
+    Transaction,
+    TransactionItem,
+)
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,7 +29,7 @@ class TimeFilterWorker(FilterWorker):
         self.end_time = time(end_hour, 0)       # 11:00 PM (23:00)
         logger.info(f"TimeFilterWorker configured with time range: {self.start_time} - {self.end_time}")
     
-    def apply_filter(self, item: Any) -> bool:
+    def apply_filter(self, item: Union[Transaction, TransactionItem]) -> bool:
         try:
             created_at = item.get('created_at')
             if not created_at:
