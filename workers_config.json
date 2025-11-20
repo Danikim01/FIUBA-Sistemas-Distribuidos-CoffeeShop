@@ -43,7 +43,7 @@
         "IS_SHARDED_WORKER": "True"
       }
     },
-    "year_filter_aggregator": {
+    "year_filter_eof_barrier": {
       "environment": {
         "INPUT_QUEUE": "transactions_year_filtered_aggregator_input",
         "OUTPUT_EXCHANGE": "transactions_year_filtered",
@@ -66,7 +66,7 @@
         "IS_SHARDED_WORKER": "True"
       }
     },
-    "items_year_filter_aggregator": {
+    "items_year_filter_eof_barrier": {
       "environment": {
         "INPUT_QUEUE": "transaction_items_year_filtered_aggregator_input",
         "OUTPUT_QUEUE": "transaction_items_year_filtered",
@@ -90,7 +90,7 @@
         "IS_SHARDED_WORKER": "True"
       }
     },
-    "time_filter_aggregator": {
+    "time_filter_eof_barrier": {
       "environment": {
         "INPUT_QUEUE": "transactions_time_filtered_aggregator_input",
         "OUTPUT_EXCHANGE": "transactions_time_filtered",
@@ -114,7 +114,7 @@
         "IS_SHARDED_WORKER": "True"
       }
     },
-    "amount_filter_aggregator": {
+    "amount_filter_eof_barrier": {
       "environment": {
         "INPUT_QUEUE": "gateway_results_aggregator_input",
         "OUTPUT_QUEUE": "gateway_results",

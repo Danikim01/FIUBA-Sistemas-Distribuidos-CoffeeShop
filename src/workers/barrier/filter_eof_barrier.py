@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Filter Aggregator Worker that aggregates messages from multiple filter worker replicas."""
+"""Filter EOF Barrier Worker that outputs single EOF after receiving all EOFs from replicas."""
 
 import logging
 import os
@@ -16,10 +16,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class FilterAggregator(BaseWorker):
+class FilterEOFBarrier(BaseWorker):
     """
-    Aggregator worker that receives messages (data and EOFs) from filter workers
-    and aggregates EOFs before propagating to output.
+    Barrier worker that receives messages (data and EOFs) from filter workers
+    and outputs a single EOF after receiving all EOFs from replicas.
     
     Forwards data messages immediately without accumulating them in memory.
     When EOF count reaches REPLICA_COUNT, propagates EOF to output.
@@ -28,7 +28,7 @@ class FilterAggregator(BaseWorker):
     """
     
     def __init__(self):
-        """Initialize Filter Aggregator Worker."""
+        """Initialize Filter EOF Barrier Worker."""
         super().__init__()
         self.replica_count = int(os.getenv('REPLICA_COUNT', '3'))
         self.end_of_file_received = {}  # {client_id: count}
@@ -39,15 +39,15 @@ class FilterAggregator(BaseWorker):
         self._processed_store = ProcessedMessageStore(worker_label)
         
         logger.info(
-            f"Filter Aggregator initialized - Input: {self.middleware_config.get_input_target()}, "
+            f"Filter EOF Barrier initialized - Input: {self.middleware_config.get_input_target()}, "
             f"Output: {self.middleware_config.get_output_target()}, "
             f"Replica count: {self.replica_count}"
         )
         logger.info(
-            f"\033[33m[FILTER-AGGREGATOR] Forwarding messages immediately, aggregating EOFs only\033[0m"
+            f"\033[33m[FILTER-EOF-BARRIER] Forwarding messages immediately, outputing single EOF after receiving all EOFs from replicas\033[0m"
         )
         logger.info(
-            f"\033[33m[FILTER-AGGREGATOR] Deduplication enabled to handle message retries\033[0m"
+            f"\033[33m[FILTER-EOF-BARRIER] Deduplication enabled to handle message retries\033[0m"
         )
     
     def _get_current_message_uuid(self) -> str | None:
@@ -69,7 +69,7 @@ class FilterAggregator(BaseWorker):
         message_uuid = self._get_current_message_uuid()
         if message_uuid and self._processed_store.has_processed(client_id, message_uuid):
             logger.debug(
-                "[FILTER-AGGREGATOR] Duplicate message %s for client %s detected; skipping processing",
+                "[FILTER-EOF-BARRIER] Duplicate message %s for client %s detected; skipping processing",
                 message_uuid,
                 client_id,
             )
@@ -98,7 +98,7 @@ class FilterAggregator(BaseWorker):
             # Forward message immediately without accumulating
             self.send_message(client_id=client_id, data=message)
             logger.debug(
-                f"[FILTER-AGGREGATOR] Forwarded message immediately for client {client_id}"
+                f"[FILTER-EOF-BARRIER] Forwarded message immediately for client {client_id}"
             )
         finally:
             self._mark_processed(client_id, message_uuid)
@@ -121,13 +121,13 @@ class FilterAggregator(BaseWorker):
             if isinstance(batch, list) and batch:
                 self.send_message(client_id=client_id, data=batch)
                 logger.debug(
-                    f"[FILTER-AGGREGATOR] Forwarded batch of {len(batch)} messages immediately for client {client_id}"
+                    f"[FILTER-EOF-BARRIER] Forwarded batch of {len(batch)} messages immediately for client {client_id}"
                 )
             elif batch:
                 # Single message in batch format
                 self.send_message(client_id=client_id, data=batch)
                 logger.debug(
-                    f"[FILTER-AGGREGATOR] Forwarded single message immediately for client {client_id}"
+                    f"[FILTER-EOF-BARRIER] Forwarded single message immediately for client {client_id}"
                 )
         finally:
             self._mark_processed(client_id, message_uuid)
@@ -149,7 +149,7 @@ class FilterAggregator(BaseWorker):
         
         # Log when EOF is received (cyan color)
         logger.info(
-            f"\033[36m[FILTER-AGGREGATOR] Received EOF marker for client {client_id} - "
+            f"\033[36m[FILTER-EOF-BARRIER] Received EOF marker for client {client_id} - "
             f"count: {current_count}/{self.replica_count}\033[0m"
         )
         
@@ -157,14 +157,14 @@ class FilterAggregator(BaseWorker):
         if current_count >= self.replica_count:
             # Log when all EOFs are received (bright green)
             logger.info(
-                f"\033[92m[FILTER-AGGREGATOR] All EOFs received for client {client_id} "
+                f"\033[92m[FILTER-EOF-BARRIER] All EOFs received for client {client_id} "
                 f"({current_count}/{self.replica_count}), propagating EOF\033[0m"
             )
             
             # Propagate EOF to output
             self.eof_handler.output_eof(client_id=client_id)
             logger.info(
-                f"\033[32m[FILTER-AGGREGATOR] EOF propagated for client {client_id}\033[0m"
+                f"\033[32m[FILTER-EOF-BARRIER] EOF propagated for client {client_id}\033[0m"
             )
                 
             # Reset counter for this client
@@ -189,7 +189,7 @@ class FilterAggregator(BaseWorker):
             if self.middleware_config.has_output_exchange():
                 routing_key = self.middleware_config.output_exchange
                 logger.debug(
-                    f"[FILTER-AGGREGATOR] Sending EOF to exchange '{routing_key}' "
+                    f"[FILTER-EOF-BARRIER] Sending EOF to exchange '{routing_key}' "
                     f"with routing_key '{routing_key}' for client {client_id}"
                 )
                 self.send_message(
@@ -205,17 +205,17 @@ class FilterAggregator(BaseWorker):
             
             # Log when EOF is sent (green color)
             logger.info(
-                f"\033[32m[FILTER-AGGREGATOR] EOF sent to {output_target} for client {client_id}\033[0m"
+                f"\033[32m[FILTER-EOF-BARRIER] EOF sent to {output_target} for client {client_id}\033[0m"
             )
         except Exception as e:
             # Log error in red
             logger.error(
-                f"\033[31m[FILTER-AGGREGATOR] Failed to propagate EOF to {output_target} for client {client_id}: {e}\033[0m",
+                f"\033[31m[FILTER-EOF-BARRIER] Failed to propagate EOF to {output_target} for client {client_id}: {e}\033[0m",
                 exc_info=True
             )
             raise
 
 
 if __name__ == "__main__":
-    run_main(FilterAggregator)
+    run_main(FilterEOFBarrier)
 

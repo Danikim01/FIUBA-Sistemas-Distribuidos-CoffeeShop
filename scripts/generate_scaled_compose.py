@@ -52,10 +52,10 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE", "IS_SHARDED_WORKER"],
         "scalable": True,
     },
-    "year_filter_aggregator": {
-        "display_name": "Year Filter Aggregator",
-        "base_service_name": "year-filter-aggregator",
-        "command": ["python", "router/filter_aggregator.py"],
+    "year_filter_eof_barrier": {
+        "display_name": "Year Filter EOF Barrier",
+        "base_service_name": "year-filter-eof-barrier",
+        "command": ["python", "barrier/filter_eof_barrier.py"],
         "needs_worker_id": False,
         "required_environment": ["INPUT_QUEUE", "OUTPUT_EXCHANGE", "REPLICA_COUNT"],
         "scalable": False,
@@ -76,10 +76,10 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE", "IS_SHARDED_WORKER"],
         "scalable": True,
     },
-    "items_year_filter_aggregator": {
-        "display_name": "Items Year Filter Aggregator",
-        "base_service_name": "items-year-filter-aggregator",
-        "command": ["python", "router/filter_aggregator.py"],
+    "items_year_filter_eof_barrier": {
+        "display_name": "Items Year Filter EOF Barrier",
+        "base_service_name": "items-year-filter-eof-barrier",
+        "command": ["python", "barrier/filter_eof_barrier.py"],
         "needs_worker_id": False,
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE", "REPLICA_COUNT"],
         "scalable": False,
@@ -100,10 +100,10 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE", "IS_SHARDED_WORKER"],
         "scalable": True,
     },
-    "time_filter_aggregator": {
-        "display_name": "Time Filter Aggregator",
-        "base_service_name": "time-filter-aggregator",
-        "command": ["python", "router/filter_aggregator.py"],
+    "time_filter_eof_barrier": {
+        "display_name": "Time Filter EOF Barrier",
+        "base_service_name": "time-filter-eof-barrier",
+        "command": ["python", "barrier/filter_eof_barrier.py"],
         "needs_worker_id": False,
         "required_environment": ["INPUT_QUEUE", "OUTPUT_EXCHANGE", "REPLICA_COUNT"],
         "scalable": False,
@@ -124,10 +124,10 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE", "IS_SHARDED_WORKER"],
         "scalable": True,
     },
-    "amount_filter_aggregator": {
-        "display_name": "Amount Filter Aggregator",
-        "base_service_name": "amount-filter-aggregator",
-        "command": ["python", "router/filter_aggregator.py"],
+    "amount_filter_eof_barrier": {
+        "display_name": "Amount Filter EOF Barrier",
+        "base_service_name": "amount-filter-eof-barrier",
+        "command": ["python", "barrier/filter_eof_barrier.py"],
         "needs_worker_id": False,
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE", "REPLICA_COUNT"],
         "scalable": False,
@@ -257,10 +257,10 @@ AGGREGATOR_TO_SHARDED: Dict[str, str] = {
     "tpv_aggregator": "tpv_sharded",
     "items_aggregator": "items_sharded",
     "top_clients_birthdays": "top_clients",
-    "year_filter_aggregator": "year_filter",
-    "items_year_filter_aggregator": "items_year_filter",
-    "time_filter_aggregator": "time_filter",
-    "amount_filter_aggregator": "amount_filter",
+    "year_filter_eof_barrier": "year_filter",
+    "items_year_filter_eof_barrier": "items_year_filter",
+    "time_filter_eof_barrier": "time_filter",
+    "amount_filter_eof_barrier": "amount_filter",
 }
 
 
