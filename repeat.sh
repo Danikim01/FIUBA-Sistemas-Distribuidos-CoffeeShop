@@ -22,7 +22,7 @@ mkdir -p "$LOGS_DIR"
 echo "================================================"
 echo "Iniciando $NUM_ITERATIONS iteraciones de prueba"
 echo "Cada iteración ejecutará: ./run.sh 3 5"
-echo "Tiempo de espera por iteración: 30 minutos"
+echo "Tiempo de espera por iteración: 15 minutos"
 echo "================================================"
 echo ""
 
@@ -32,17 +32,15 @@ for i in $(seq 1 $NUM_ITERATIONS); do
     echo "Hora de inicio: $(date '+%Y-%m-%d %H:%M:%S')"
     echo "========================================"
     
-    echo "Ejecutando ./run.sh 3 5..."
-    ./run.sh 3 5
+    echo "Ejecutando ./run.sh 3 5 en background..."
+    ./run.sh 3 5 > "$LOGS_DIR/intento${i}-run.log" 2>&1 &
+    RUN_PID=$!
+    echo "Proceso ./run.sh iniciado con PID: $RUN_PID"
+    echo "Log del run.sh guardado en: $LOGS_DIR/intento${i}-run.log"
     
-    if [ $? -ne 0 ]; then
-        echo "Error: ./run.sh falló en la iteración $i"
-        echo "Continuando con la siguiente iteración..."
-    fi
-    
-    echo "Esperando 30 minutos para que terminen los procesos..."
-    echo "Finalización estimada: $(date -d '+30 minutes' '+%Y-%m-%d %H:%M:%S')"
-    sleep 1800
+    echo "Esperando 15 minutos para que terminen los procesos..."
+    echo "Finalización estimada: $(date -d '+15 minutes' '+%Y-%m-%d %H:%M:%S')"
+    sleep 900
     
     echo "Capturando logs de los clientes..."
     
@@ -61,9 +59,26 @@ for i in $(seq 1 $NUM_ITERATIONS); do
         echo "Logs guardados para la iteración $i"
     fi
     
+    if [ $i -lt $NUM_ITERATIONS ]; then
+        if kill -0 $RUN_PID 2>/dev/null; then
+            echo "Deteniendo proceso run.sh (PID: $RUN_PID)..."
+            pkill -P $RUN_PID 2>/dev/null
+            kill $RUN_PID 2>/dev/null
+        fi
+        
+        echo ""
+        echo "Esperando 10 segundos antes de la siguiente iteración..."
+        sleep 10
+    fi
+    
     echo "Iteración $i completada"
     echo ""
 done
+
+# Limpieza final
+echo ""
+echo "Deteniendo procesos run.sh restantes..."
+pkill -f "./run.sh" 2>/dev/null
 
 echo "================================================"
 echo "Todas las iteraciones completadas"
