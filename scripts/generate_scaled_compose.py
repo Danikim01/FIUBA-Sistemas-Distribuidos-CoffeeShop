@@ -304,6 +304,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Override every scalable worker count with this value",
     )
+    parser.add_argument(
+        "--clients",
+        type=int,
+        default=None,
+        help="Override the number of client instances",
+    )
     return parser.parse_args()
 
 
@@ -341,6 +347,27 @@ def apply_uniform_scale(config: Dict[str, Any], raw_scale: Optional[int]) -> Non
                 f"Worker '{worker_key}' configuration must be an object to apply scaling"
             )
         worker_cfg["count"] = scale_value
+
+
+def apply_client_count(config: Dict[str, Any], client_count: int) -> None:
+    """Override the client count in the configuration."""
+    if client_count <= 0:
+        raise SystemExit("Client count must be a positive integer")
+    
+    # Ensure service_environment section exists
+    if "service_environment" not in config:
+        config["service_environment"] = {}
+    if not isinstance(config["service_environment"], dict):
+        raise SystemExit("Config 'service_environment' must be an object")
+    
+    # Ensure client section exists
+    if "client" not in config["service_environment"]:
+        config["service_environment"]["client"] = {}
+    if not isinstance(config["service_environment"]["client"], dict):
+        raise SystemExit("Config 'service_environment.client' must be an object")
+    
+    # Set the client count
+    config["service_environment"]["client"]["count"] = client_count
 
 
 def normalize_environment(overrides: Optional[Mapping[str, Any]], context: str) -> Dict[str, str]:
@@ -1067,6 +1094,8 @@ def main() -> None:
     args = parse_args()
     config = read_config(args.config)
     apply_uniform_scale(config, args.scale)
+    if args.clients is not None:
+        apply_client_count(config, args.clients)
     content = generate_compose(config)
     write_output(args.output, content)
     print(f"Generated {args.output} from {args.config}")
