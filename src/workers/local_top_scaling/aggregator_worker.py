@@ -80,6 +80,17 @@ class AggregatorWorker(BaseWorker):
             for entry in batch:
                 self.accumulate_transaction(client_id, entry)
 
+    def _get_current_message_uuid(self) -> str | None:
+        """Fetch message UUID from current message metadata, if available."""
+        metadata = self._get_current_message_metadata()
+        if not metadata:
+            return None
+        message_uuid = metadata.get('message_uuid')
+        if not message_uuid:
+            logger.warning("Missing message_uuid in metadata: %s", metadata.keys())
+            return None
+        return str(message_uuid)
+
     @staticmethod
     def _chunk_payload(payload: list[Dict[str, Any]], chunk_size: int) -> list[list[Dict[str, Any]]]:
         """Chunk the payload into smaller lists of a given size."""

@@ -6,12 +6,14 @@ import logging
 import os
 import threading
 from collections import defaultdict
+from pathlib import Path
 from typing import Any, DefaultDict, Dict, List
 from message_utils import ClientId # pyright: ignore[reportMissingImports]
 from worker_utils import run_main, safe_int_conversion # pyright: ignore[reportMissingImports]
 from workers.local_top_scaling.aggregator_worker import AggregatorWorker
 from workers.extra_source.users import UsersExtraSource
 from workers.extra_source.stores import StoresExtraSource
+from workers.state_manager.users_state_manager import UsersStateManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,12 +29,28 @@ class TopClientsBirthdaysAggregator(AggregatorWorker):
         
         self.top_n = safe_int_conversion(os.getenv('TOP_USERS_COUNT'), default=3)
 
+        state_path_env = os.getenv("STATE_FILE")
+        state_dir_env = os.getenv("STATE_DIR")
+
+        state_path = Path(state_path_env) if state_path_env else None
+        state_dir = Path(state_dir_env) if state_dir_env else None
+
+        self.state_manager = UsersStateManager(
+            state_data=None,
+            state_path=state_path,
+            state_dir=state_dir,
+            worker_id=os.getenv("WORKER_ID", "0"),
+        )
+        if self.state_manager.state_data is None:
+            self.state_manager.update_state_data(defaultdict(lambda: defaultdict(lambda: defaultdict(int))))
+        self._user_totals: DefaultDict[ClientId, DefaultDict[int, DefaultDict[int, int]]] = (
+            self.state_manager.state_data
+        )
+
         self.stores_source = StoresExtraSource(self.middleware_config)
         self.stores_source.start_consuming()
         self.birthdays_source = UsersExtraSource(self.middleware_config)
         self.birthdays_source.start_consuming()
-        
-        self.recieved_payloads: Dict[ClientId, list[dict[str, Any]]] = {}
         
         # Track how many EOFs we've received from sharded workers per client
         # This is simpler than using the consensus mechanism since each sharded worker
@@ -44,68 +62,98 @@ class TopClientsBirthdaysAggregator(AggregatorWorker):
         self.expected_eof_count = int(os.getenv('REPLICA_COUNT', '2'))
 
     def reset_state(self, client_id: ClientId) -> None:
-        try:
-            del self.recieved_payloads[client_id]
-        except KeyError:
-            pass
+        self._user_totals.pop(client_id, None)
         self.stores_source.reset_state(client_id)
         self.birthdays_source.reset_state(client_id)
     
+    def _process_entries(self, entries: list[Dict[str, Any]], client_id: ClientId) -> None:
+        if self.shutdown_requested:
+            logger.info("[TOP-CLIENTS-AGGREGATOR] Shutdown requested, rejecting batch to requeue")
+            raise InterruptedError("Shutdown requested before batch processing")
+
+        message_uuid = self._get_current_message_uuid()
+        if message_uuid and self.state_manager.get_last_processed_message(client_id) == message_uuid:
+            logger.info(
+                "[TOP-CLIENTS-AGGREGATOR] [DUPLICATE] Skipping duplicate batch %s for client %s (already processed)",
+                message_uuid,
+                client_id,
+            )
+            return
+
+        with self._state_lock:
+            previous_state = self.state_manager.clone_client_state(client_id)
+            previous_uuid = self.state_manager.get_last_processed_message(client_id)
+
+            try:
+                for entry in entries:
+                    if self.shutdown_requested:
+                        logger.info(
+                            "[TOP-CLIENTS-AGGREGATOR] [INTERRUPT] Shutdown requested during batch processing"
+                        )
+                        raise InterruptedError("Shutdown requested during batch processing")
+                    self.accumulate_transaction(client_id, entry)
+
+                if message_uuid:
+                    self.state_manager.set_last_processed_message(client_id, message_uuid)
+
+                if not self.shutdown_requested:
+                    self.state_manager.persist_state(client_id)
+                else:
+                    raise InterruptedError("Shutdown requested, preventing state persistence")
+            except Exception:
+                self.state_manager.restore_client_state(client_id, previous_state)
+                if message_uuid:
+                    if previous_uuid is None:
+                        self.state_manager.clear_last_processed_message(client_id)
+                    else:
+                        self.state_manager.set_last_processed_message(client_id, previous_uuid)
+                raise
+
+    def process_batch(self, batch: list[Dict[str, Any]], client_id: ClientId):
+        self._process_entries(batch, client_id)
+
+    def process_message(self, message: dict[str, Any], client_id: ClientId):
+        self._process_entries([message], client_id)
+
     def accumulate_transaction(self, client_id: str, payload: dict[str, Any]) -> None:
-        self.recieved_payloads.setdefault(client_id, []).append(payload)
+        store_id = safe_int_conversion(payload.get("store_id"), minimum=0)
+        user_id = safe_int_conversion(payload.get("user_id"), minimum=0)
+
+        raw_qty = payload.get("purchases_qty") or payload.get("purchase_qty") or 0
+        purchase_qty = safe_int_conversion(raw_qty, default=0)
+
+        if store_id <= 0 or user_id <= 0 or purchase_qty <= 0:
+            return
+
+        store_bucket = self._user_totals[client_id][store_id]
+        store_bucket[user_id] += purchase_qty
 
     def create_payload(self, client_id: ClientId) -> list[Dict[str, Any]]:
-        client_payloads = self.recieved_payloads.pop(client_id, [])
-        aggregated: Dict[tuple[str, int], Dict[str, Any]] = {}
-
-        for payload in client_payloads:
-            store_id = str(payload.get("store_id", "")).strip()
-            try:
-                user_id = int(payload.get("user_id", 0))
-            except (TypeError, ValueError):
-                user_id = 0
-
-            raw_qty = payload.get("purchases_qty") or payload.get("purchase_qty") or 0
-            try:
-                purchase_qty = int(raw_qty)
-            except (TypeError, ValueError):
-                purchase_qty = 0
-
-            if not store_id or user_id <= 0 or purchase_qty <= 0:
-                continue
-
-            key = (store_id, user_id)
-
-            if key not in aggregated:
-                aggregated[key] = {
-                    "store_id": store_id,
-                    "user_id": user_id,
-                    "purchases_qty": 0,
-                }
-
-            aggregated[key]["purchases_qty"] += purchase_qty
+        client_totals = self._user_totals.pop(client_id, {})
 
         # Enrich with birthdays and store names
         grouped_results: DefaultDict[str, List[Dict[str, Any]]] = defaultdict(list)
-        for entry in aggregated.values():
-            user_id = entry["user_id"]
-            store_id = entry["store_id"]
+        for store_id, user_counts in client_totals.items():
+            for user_id, purchase_qty in user_counts.items():
+                if purchase_qty <= 0:
+                    continue
 
-            birthdate = self.birthdays_source.get_item_when_done(
-                client_id,
-                str(user_id),
-            )
-            store_name = self.stores_source.get_item_when_done(client_id, store_id)
+                birthdate = self.birthdays_source.get_item_when_done(
+                    client_id,
+                    str(user_id),
+                )
+                store_id_str = str(store_id)
+                store_name = self.stores_source.get_item_when_done(client_id, store_id_str)
 
-            grouped_results[store_id].append(
-                {
-                    "user_id": user_id,
-                    "store_id": store_id,
-                    "store_name": store_name,
-                    "birthdate": birthdate,
-                    "purchases_qty": entry["purchases_qty"],
-                }
-            )
+                grouped_results[store_id_str].append(
+                    {
+                        "user_id": user_id,
+                        "store_id": store_id_str,
+                        "store_name": store_name,
+                        "birthdate": birthdate,
+                        "purchases_qty": purchase_qty,
+                    }
+                )
 
         limited_results: List[Dict[str, Any]] = []
         for store_id, entries in grouped_results.items():
@@ -141,6 +189,16 @@ class TopClientsBirthdaysAggregator(AggregatorWorker):
            final aggregated results
         """
         logger.info(f"[TOP-CLIENTS-AGGREGATOR] Received EOF for client {client_id}")
+
+        message_uuid = self._get_current_message_uuid()
+
+        if message_uuid and self.state_manager.get_last_processed_message(client_id) == message_uuid:
+            logger.info(
+                "[TOP-CLIENTS-AGGREGATOR] [DUPLICATE] Skipping duplicate EOF %s for client %s (already processed)",
+                message_uuid,
+                client_id,
+            )
+            return
         
         # Increment EOF counter for this client
         with self.eof_count_lock:
@@ -166,7 +224,6 @@ class TopClientsBirthdaysAggregator(AggregatorWorker):
                 with self._state_lock:
                     payload = self.create_payload(client_id)
                     if payload:
-                        self.reset_state(client_id)
                         if self.chunk_payload:
                             payload_batches = [payload]
                         else:
@@ -174,6 +231,29 @@ class TopClientsBirthdaysAggregator(AggregatorWorker):
 
                 for chunk in payload_batches:
                     self.send_payload(chunk, client_id)
+
+                with self._state_lock:
+                    previous_state = self.state_manager.clone_client_state(client_id)
+                    previous_uuid = self.state_manager.get_last_processed_message(client_id)
+                    try:
+                        if message_uuid:
+                            self.state_manager.set_last_processed_message(client_id, message_uuid)
+                        else:
+                            self.state_manager.clear_last_processed_message(client_id)
+
+                        self.reset_state(client_id)
+                        self.state_manager.drop_empty_client_state(client_id)
+                        self.state_manager.persist_state(client_id)
+                    except Exception:
+                        self.state_manager.restore_client_state(client_id, previous_state)
+                        if message_uuid:
+                            if previous_uuid is None:
+                                self.state_manager.clear_last_processed_message(client_id)
+                            else:
+                                self.state_manager.set_last_processed_message(client_id, previous_uuid)
+                        elif previous_uuid is not None:
+                            self.state_manager.set_last_processed_message(client_id, previous_uuid)
+                        raise
                 
                 # Clean up EOF counter for this client
                 with self.eof_count_lock:

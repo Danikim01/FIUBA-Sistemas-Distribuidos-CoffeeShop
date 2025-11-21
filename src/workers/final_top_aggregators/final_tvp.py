@@ -3,11 +3,13 @@ import logging
 import os
 import threading
 from typing import Any, DefaultDict, Dict, List
+from pathlib import Path
 from message_utils import ClientId # pyright: ignore[reportMissingImports]
 from workers.local_top_scaling.aggregator_worker import AggregatorWorker
 from workers.local_top_scaling.tpv_sharded import StoreId, YearHalf
 from workers.extra_source.stores import StoresExtraSource
 from worker_utils import normalize_tpv_entry, safe_int_conversion, tpv_sort_key, run_main # pyright: ignore[reportMissingImports]
+from workers.state_manager.tpv_state_manager import TPVStateManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,10 +23,23 @@ class TPVAggregator(AggregatorWorker):
         
         self.stores_source = StoresExtraSource(self.middleware_config)
         self.stores_source.start_consuming()
+
+        state_path_env = os.getenv("STATE_FILE")
+        state_dir_env = os.getenv("STATE_DIR")
+
+        state_path = Path(state_path_env) if state_path_env else None
+        state_dir = Path(state_dir_env) if state_dir_env else None
+
+        self.state_manager = TPVStateManager(
+            state_data=None,
+            state_path=state_path,
+            state_dir=state_dir,
+            worker_id=os.getenv("WORKER_ID", "0"),
+        )
+        if self.state_manager.state_data is None:
+            self.state_manager.update_state_data(defaultdict(lambda: defaultdict(lambda: defaultdict(float))))
         
-        self.recieved_payloads: DefaultDict[
-            ClientId, DefaultDict[YearHalf, DefaultDict[StoreId, float]]
-        ] = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+        self.recieved_payloads = self.state_manager.state_data
         
         # Track how many EOFs we've received from sharded workers per client
         # This is simpler than using the consensus mechanism since each sharded worker
@@ -41,6 +56,53 @@ class TPVAggregator(AggregatorWorker):
         except KeyError:
             pass
         self.stores_source.reset_state(client_id)
+
+    def _process_entries(self, entries: list[Dict[str, Any]], client_id: ClientId) -> None:
+        if self.shutdown_requested:
+            logger.info("[TPV-AGGREGATOR] Shutdown requested, rejecting batch to requeue")
+            raise InterruptedError("Shutdown requested before batch processing")
+
+        message_uuid = self._get_current_message_uuid()
+        if message_uuid and self.state_manager.get_last_processed_message(client_id) == message_uuid:
+            logger.info(
+                "[TPV-AGGREGATOR] [DUPLICATE] Skipping duplicate batch %s for client %s (already processed)",
+                message_uuid,
+                client_id,
+            )
+            return
+
+        with self._state_lock:
+            previous_state = self.state_manager.clone_client_state(client_id)
+            previous_uuid = self.state_manager.get_last_processed_message(client_id)
+
+            try:
+                for entry in entries:
+                    if self.shutdown_requested:
+                        logger.info("[TPV-AGGREGATOR] [INTERRUPT] Shutdown requested during batch processing")
+                        raise InterruptedError("Shutdown requested during batch processing")
+                    self.accumulate_transaction(client_id, entry)
+
+                if message_uuid:
+                    self.state_manager.set_last_processed_message(client_id, message_uuid)
+
+                if not self.shutdown_requested:
+                    self.state_manager.persist_state(client_id)
+                else:
+                    raise InterruptedError("Shutdown requested, preventing state persistence")
+            except Exception:
+                self.state_manager.restore_client_state(client_id, previous_state)
+                if message_uuid:
+                    if previous_uuid is None:
+                        self.state_manager.clear_last_processed_message(client_id)
+                    else:
+                        self.state_manager.set_last_processed_message(client_id, previous_uuid)
+                raise
+
+    def process_batch(self, batch: list[Dict[str, Any]], client_id: ClientId):
+        self._process_entries(batch, client_id)
+
+    def process_message(self, message: dict, client_id: ClientId):
+        self._process_entries([message], client_id)
 
     def accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
         """Accumulate data from a single transaction payload."""
@@ -93,6 +155,16 @@ class TPVAggregator(AggregatorWorker):
            final aggregated results
         """
         logger.info(f"[TPV-AGGREGATOR] Received EOF for client {client_id}")
+
+        message_uuid = self._get_current_message_uuid()
+
+        if message_uuid and self.state_manager.get_last_processed_message(client_id) == message_uuid:
+            logger.info(
+                "[TPV-AGGREGATOR] [DUPLICATE] Skipping duplicate EOF %s for client %s (already processed)",
+                message_uuid,
+                client_id,
+            )
+            return
         
         # Increment EOF counter for this client
         with self.eof_count_lock:
@@ -118,7 +190,6 @@ class TPVAggregator(AggregatorWorker):
                 with self._state_lock:
                     payload = self.create_payload(client_id)
                     if payload:
-                        self.reset_state(client_id)
                         if self.chunk_payload:
                             payload_batches = [payload]
                         else:
@@ -126,6 +197,29 @@ class TPVAggregator(AggregatorWorker):
 
                 for chunk in payload_batches:
                     self.send_payload(chunk, client_id)
+
+                with self._state_lock:
+                    previous_state = self.state_manager.clone_client_state(client_id)
+                    previous_uuid = self.state_manager.get_last_processed_message(client_id)
+                    try:
+                        if message_uuid:
+                            self.state_manager.set_last_processed_message(client_id, message_uuid)
+                        else:
+                            self.state_manager.clear_last_processed_message(client_id)
+
+                        self.reset_state(client_id)
+                        self.state_manager.drop_empty_client_state(client_id)
+                        self.state_manager.persist_state(client_id)
+                    except Exception:
+                        self.state_manager.restore_client_state(client_id, previous_state)
+                        if message_uuid:
+                            if previous_uuid is None:
+                                self.state_manager.clear_last_processed_message(client_id)
+                            else:
+                                self.state_manager.set_last_processed_message(client_id, previous_uuid)
+                        elif previous_uuid is not None:
+                            self.state_manager.set_last_processed_message(client_id, previous_uuid)
+                        raise
                 
                 # Clean up EOF counter for this client
                 with self.eof_count_lock:

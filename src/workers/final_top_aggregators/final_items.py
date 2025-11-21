@@ -6,12 +6,14 @@ import logging
 import os
 import threading
 from collections import defaultdict
+from pathlib import Path
 from typing import Any, DefaultDict, Dict, List, Mapping
 
 from message_utils import ClientId # pyright: ignore[reportMissingImports]
 from worker_utils import run_main, safe_int_conversion, top_items_sort_key # pyright: ignore[reportMissingImports]
 from workers.extra_source.menu_items import MenuItemsExtraSource
 from workers.local_top_scaling.aggregator_worker import AggregatorWorker
+from workers.state_manager.items_state_manager import ItemsStateManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -43,11 +45,28 @@ class FinalItemsAggregator(AggregatorWorker):
 
         self.top_per_month = safe_int_conversion(os.getenv("TOP_ITEMS_COUNT"), default=1)
 
-        self._quantity_totals: DefaultDict[ClientId, QuantityTotals]
-        self._quantity_totals = defaultdict(_new_quantity_totals)
+        state_path_env = os.getenv("STATE_FILE")
+        state_dir_env = os.getenv("STATE_DIR")
 
-        self._profit_totals: DefaultDict[ClientId, ProfitTotals]
-        self._profit_totals = defaultdict(_new_profit_totals)
+        state_path = Path(state_path_env) if state_path_env else None
+        state_dir = Path(state_dir_env) if state_dir_env else None
+
+        self.state_manager = ItemsStateManager(
+            state_data=None,
+            state_path=state_path,
+            state_dir=state_dir,
+            worker_id=os.getenv("WORKER_ID", "0"),
+        )
+
+        state_data = self.state_manager.state_data
+        if state_data is None:
+            quantity_totals = defaultdict(_new_quantity_totals)
+            profit_totals = defaultdict(_new_profit_totals)
+            state_data = (quantity_totals, profit_totals)
+            self.state_manager.update_state_data(state_data)
+
+        self._quantity_totals = self.state_manager.quantity_totals
+        self._profit_totals = self.state_manager.profit_totals
 
         self.menu_items_source = MenuItemsExtraSource(self.middleware_config)
         self.menu_items_source.start_consuming()
@@ -162,6 +181,56 @@ class FinalItemsAggregator(AggregatorWorker):
 
         return [payload]
 
+    def _process_entries(self, entries: list[Dict[str, Any]], client_id: ClientId) -> None:
+        if self.shutdown_requested:
+            logger.info("[PROCESSING - BATCH] Shutdown requested, rejecting batch to requeue")
+            raise InterruptedError("Shutdown requested before batch processing")
+
+        message_uuid = self._get_current_message_uuid()
+        if message_uuid and self.state_manager.get_last_processed_message(client_id) == message_uuid:
+            logger.info(
+                "[PROCESSING - BATCH] [DUPLICATE] Skipping duplicate batch %s for client %s (already processed)",
+                message_uuid,
+                client_id,
+            )
+            return
+
+        with self._state_lock:
+            previous_state = self.state_manager.clone_client_state(client_id)
+            previous_uuid = self.state_manager.get_last_processed_message(client_id)
+
+            try:
+                for entry in entries:
+                    if self.shutdown_requested:
+                        logger.info(
+                            "[PROCESSING - BATCH] [INTERRUPT] Shutdown requested during batch processing, rolling back"
+                        )
+                        raise InterruptedError("Shutdown requested during batch processing")
+
+                    self.accumulate_transaction(client_id, entry)
+
+                if message_uuid:
+                    self.state_manager.set_last_processed_message(client_id, message_uuid)
+
+                if not self.shutdown_requested:
+                    self.state_manager.persist_state(client_id)
+                else:
+                    raise InterruptedError("Shutdown requested, preventing state persistence")
+            except Exception:
+                self.state_manager.restore_client_state(client_id, previous_state)
+                if message_uuid:
+                    if previous_uuid is None:
+                        self.state_manager.clear_last_processed_message(client_id)
+                    else:
+                        self.state_manager.set_last_processed_message(client_id, previous_uuid)
+                raise
+
+    def process_batch(self, batch: list[Dict[str, Any]], client_id: ClientId):
+        self._process_entries(batch, client_id)
+
+    def process_message(self, message: dict, client_id: ClientId):
+        self._process_entries([message], client_id)
+
     def gateway_type_metadata(self) -> dict:
         return {
             "bundle_types": {
@@ -183,6 +252,16 @@ class FinalItemsAggregator(AggregatorWorker):
            final aggregated results along with our own EOF
         """
         logger.info(f"[ITEMS-AGGREGATOR] Received EOF for client {client_id}")
+
+        message_uuid = self._get_current_message_uuid()
+
+        if message_uuid and self.state_manager.get_last_processed_message(client_id) == message_uuid:
+            logger.info(
+                "[ITEMS-AGGREGATOR] [DUPLICATE] Skipping duplicate EOF %s for client %s (already processed)",
+                message_uuid,
+                client_id,
+            )
+            return
         
         # Increment EOF counter for this client
         with self.eof_count_lock:
@@ -208,7 +287,6 @@ class FinalItemsAggregator(AggregatorWorker):
                 with self._state_lock:
                     payload = self.create_payload(client_id)
                     if payload:
-                        self.reset_state(client_id)
                         if self.chunk_payload:
                             payload_batches = [payload]
                         else:
@@ -216,6 +294,29 @@ class FinalItemsAggregator(AggregatorWorker):
 
                 for chunk in payload_batches:
                     self.send_payload(chunk, client_id)
+                
+                with self._state_lock:
+                    previous_state = self.state_manager.clone_client_state(client_id)
+                    previous_uuid = self.state_manager.get_last_processed_message(client_id)
+                    try:
+                        if message_uuid:
+                            self.state_manager.set_last_processed_message(client_id, message_uuid)
+                        else:
+                            self.state_manager.clear_last_processed_message(client_id)
+
+                        self.reset_state(client_id)
+                        self.state_manager.drop_empty_client_state(client_id)
+                        self.state_manager.persist_state(client_id)
+                    except Exception:
+                        self.state_manager.restore_client_state(client_id, previous_state)
+                        if message_uuid:
+                            if previous_uuid is None:
+                                self.state_manager.clear_last_processed_message(client_id)
+                            else:
+                                self.state_manager.set_last_processed_message(client_id, previous_uuid)
+                        elif previous_uuid is not None:
+                            self.state_manager.set_last_processed_message(client_id, previous_uuid)
+                        raise
                 
                 # Clean up EOF counter for this client
                 with self.eof_count_lock:
