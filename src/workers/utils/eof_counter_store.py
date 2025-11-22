@@ -9,7 +9,7 @@ import logging
 import os
 import threading
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Set
 
 from message_utils import ClientId
 
@@ -38,6 +38,7 @@ class EOFCounterStore:
         self._store_dir.mkdir(parents=True, exist_ok=True)
 
         self._cache: Dict[ClientId, int] = {}
+        self._processed_eofs_cache: Dict[ClientId, Set[str]] = {}
         self._lock = threading.RLock()
         
         # Clean up any leftover temp files from previous crashes
@@ -92,6 +93,7 @@ class EOFCounterStore:
                 
                 client_id = raw.get('client_id')
                 counter = raw.get('eof_count', 0)
+                processed_uuids = raw.get('processed_eof_uuids', [])
                 checksum = raw.get('checksum')
                 
                 if not client_id:
@@ -102,7 +104,8 @@ class EOFCounterStore:
                 # Validate checksum
                 payload = {
                     'client_id': client_id,
-                    'eof_count': counter
+                    'eof_count': counter,
+                    'processed_eof_uuids': sorted(processed_uuids) if processed_uuids else []
                 }
                 if checksum and checksum != self._compute_checksum(payload):
                     logger.info(f"\033[33m[EOF-COUNTER-STORE] Checksum mismatch for client {client_id} in {client_file}, trying backup\033[0m")
@@ -115,15 +118,18 @@ class EOFCounterStore:
                                 backup_raw = json.load(bf)
                             backup_client_id = backup_raw.get('client_id') or client_id
                             backup_counter = backup_raw.get('eof_count', 0)
+                            backup_processed_uuids = backup_raw.get('processed_eof_uuids', [])
                             backup_checksum = backup_raw.get('checksum')
                             
                             backup_payload = {
                                 'client_id': backup_client_id,
-                                'eof_count': backup_counter
+                                'eof_count': backup_counter,
+                                'processed_eof_uuids': sorted(backup_processed_uuids) if backup_processed_uuids else []
                             }
                             if backup_checksum == self._compute_checksum(backup_payload):
                                 # Backup is valid, use it
                                 counter = backup_counter
+                                processed_uuids = backup_processed_uuids
                                 client_id = backup_client_id
                                 # Restore backup as main file
                                 os.replace(backup_file, client_file)
@@ -140,8 +146,9 @@ class EOFCounterStore:
                 
                 # Load into cache
                 self._cache[client_id] = int(counter)
+                self._processed_eofs_cache[client_id] = set(str(uuid) for uuid in processed_uuids)
                 loaded_count += 1
-                logger.info(f"\033[32m[EOF-COUNTER-STORE] Loaded EOF counter for client {client_id}: {counter}\033[0m")
+                logger.info(f"\033[32m[EOF-COUNTER-STORE] Loaded EOF counter for client {client_id}: {counter}, processed UUIDs: {len(processed_uuids)}\033[0m")
                 
             except (json.JSONDecodeError, ValueError, KeyError, OSError) as exc:
                 logger.warning("[EOF-COUNTER-STORE] Failed to load client file %s: %s", client_file, exc)
@@ -171,32 +178,47 @@ class EOFCounterStore:
                     else:
                         # Format with checksum
                         counter = int(raw.get('eof_count', 0))
-                        logger.info(f"\033[32m[EOF-COUNTER-STORE] Loaded EOF counter for client {client_id}: {counter}\033[0m")
+                        processed_uuids = raw.get('processed_eof_uuids', [])
+                        self._processed_eofs_cache[client_id] = set(str(uuid) for uuid in processed_uuids)
+                        logger.info(f"\033[32m[EOF-COUNTER-STORE] Loaded EOF counter for client {client_id}: {counter}, processed UUIDs: {len(processed_uuids)}\033[0m")
                 except (json.JSONDecodeError, ValueError, PermissionError, OSError, IOError) as exc:
                     logger.warning("[EOF-COUNTER-STORE] Failed to load client %s: %s", client_id, exc)
                     counter = 0
 
             self._cache[client_id] = counter
+            # Initialize processed_uuids cache if not already loaded
+            if client_id not in self._processed_eofs_cache:
+                self._processed_eofs_cache[client_id] = set()
             return counter
 
-    def _persist_client_atomic(self, client_id: ClientId, counter: int) -> None:
+    def _persist_client_atomic(self, client_id: ClientId, counter: int, processed_uuids: Set[str] | None = None) -> None:
         """
-        Persist EOF counter for a client atomically using two-phase commit.
+        Persist EOF counter and processed UUIDs for a client atomically using two-phase commit.
         
         Protocol:
         1. Write to temp file with fsync
         2. Validate temp file integrity (checksum)
         3. Atomically replace original with temp file (with backup)
+        
+        Args:
+            client_id: Client identifier
+            counter: EOF counter value
+            processed_uuids: Set of processed EOF UUIDs (if None, uses cached value)
         """
         client_path = self._client_path(client_id)
         temp_path = client_path.with_suffix('.temp.json')
         backup_path = client_path.with_suffix('.backup.json')
         
         try:
+            # Get processed UUIDs from cache if not provided
+            if processed_uuids is None:
+                processed_uuids = self._processed_eofs_cache.get(client_id, set())
+            
             # Create payload with checksum
             payload = {
                 'client_id': client_id,
-                'eof_count': counter
+                'eof_count': counter,
+                'processed_eof_uuids': sorted(processed_uuids)
             }
             checksum = self._compute_checksum(payload)
             serialized = payload | {'checksum': checksum}
@@ -214,7 +236,8 @@ class EOFCounterStore:
                 
                 temp_payload = {
                     'client_id': temp_data.get('client_id'),
-                    'eof_count': temp_data.get('eof_count', 0)
+                    'eof_count': temp_data.get('eof_count', 0),
+                    'processed_eof_uuids': sorted(temp_data.get('processed_eof_uuids', []))
                 }
                 temp_checksum = temp_data.get('checksum')
                 
@@ -245,6 +268,57 @@ class EOFCounterStore:
                 temp_path.unlink()
             raise
 
+    def _load_processed_eofs_for_client(self, client_id: ClientId) -> Set[str]:
+        """Load all processed EOF UUIDs for a client (from cache or disk)."""
+        with self._lock:
+            if client_id in self._processed_eofs_cache:
+                return self._processed_eofs_cache[client_id]
+
+            path = self._client_path(client_id)
+            processed_uuids: Set[str] = set()
+            
+            if path.exists():
+                try:
+                    with path.open("r", encoding="utf-8") as fh:
+                        raw = json.load(fh)
+                    
+                    if isinstance(raw, dict):
+                        uuids_list = raw.get('processed_eof_uuids', [])
+                        processed_uuids = set(str(uuid) for uuid in uuids_list)
+                        logger.debug(f"[EOF-COUNTER-STORE] Loaded {len(processed_uuids)} processed EOF UUIDs for client {client_id}")
+                except (json.JSONDecodeError, ValueError, PermissionError, OSError, IOError) as exc:
+                    logger.warning("[EOF-COUNTER-STORE] Failed to load processed EOF UUIDs for client %s: %s", client_id, exc)
+                    processed_uuids = set()
+
+            self._processed_eofs_cache[client_id] = processed_uuids
+            return processed_uuids
+
+    def has_processed(self, client_id: ClientId, message_uuid: str) -> bool:
+        """Check if a EOF UUID has been processed for a client."""
+        if not message_uuid:
+            return False
+        processed_uuids = self._load_processed_eofs_for_client(client_id)
+        return message_uuid in processed_uuids
+
+    def mark_processed(self, client_id: ClientId, message_uuid: str) -> None:
+        """Mark a EOF UUID as processed for a client."""
+        if not message_uuid:
+            logger.debug(f"[EOF-COUNTER-STORE] Message UUID is None for client {client_id}")
+            return
+        
+        with self._lock:
+            processed_uuids = self._load_processed_eofs_for_client(client_id)
+            if message_uuid in processed_uuids:
+                logger.debug(f"[EOF-COUNTER-STORE] EOF UUID {message_uuid} already processed for client {client_id}")
+                return  # Already processed
+            
+            processed_uuids.add(message_uuid)
+            self._processed_eofs_cache[client_id] = processed_uuids
+            
+            # Persist both counter and processed UUIDs atomically
+            counter = self._cache.get(client_id, 0)
+            self._persist_client_atomic(client_id, counter, processed_uuids)
+
     def get_counter(self, client_id: ClientId) -> int:
         """Get the current EOF counter for a client."""
         return self._load_client(client_id)
@@ -255,22 +329,25 @@ class EOFCounterStore:
             counter = self._load_client(client_id)
             counter += 1
             self._cache[client_id] = counter
-            # Persist atomically
-            self._persist_client_atomic(client_id, counter)
+            # Persist atomically (include processed UUIDs)
+            processed_uuids = self._processed_eofs_cache.get(client_id, set())
+            self._persist_client_atomic(client_id, counter, processed_uuids)
             return counter
 
     def reset_counter(self, client_id: ClientId) -> None:
         """Reset the EOF counter for a client to 0."""
         with self._lock:
             self._cache[client_id] = 0
-            # Persist atomically
-            self._persist_client_atomic(client_id, 0)
+            # Persist atomically (keep processed UUIDs for now, they'll be cleared when client is cleared)
+            processed_uuids = self._processed_eofs_cache.get(client_id, set())
+            self._persist_client_atomic(client_id, 0, processed_uuids)
             logger.info(f"\033[32m[EOF-COUNTER-STORE] Reset EOF counter for client {client_id}\033[0m")
 
     def clear_client(self, client_id: ClientId) -> None:
-        """Clear EOF counter for a client (remove file)."""
+        """Clear EOF counter and processed UUIDs for a client (remove file)."""
         with self._lock:
             self._cache.pop(client_id, None)
+            self._processed_eofs_cache.pop(client_id, None)
             path = self._client_path(client_id)
             backup_path = path.with_suffix('.backup.json')
             # Remove both main file and backup
@@ -278,5 +355,5 @@ class EOFCounterStore:
                 path.unlink()
             with contextlib.suppress(Exception):
                 backup_path.unlink()
-            logger.info(f"\033[32m[EOF-COUNTER-STORE] Cleared EOF counter for client {client_id}\033[0m")
+            logger.info(f"\033[32m[EOF-COUNTER-STORE] Cleared EOF counter and processed UUIDs for client {client_id}\033[0m")
 
