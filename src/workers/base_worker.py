@@ -159,6 +159,10 @@ class BaseWorker(ABC):
                     client_id, actual_data, message_uuid = extract_data_and_client_id(message)
                     
                     if is_eof_message(message):
+                        logger.info(
+                            f"\033[36m[BASE-WORKER] EOF message detected for client {client_id}, "
+                            f"calling handle_eof (worker type: {self.__class__.__name__})\033[0m"
+                        )
                         return self.handle_eof(message, client_id, message_uuid)
 
                     # Validate actual_data before processing
