@@ -130,22 +130,11 @@ class ShardingRouter(BaseWorker):
                     continue
                 shard_batches[routing_key].append(message)
 
-            # Use the same UUID base for all shards to simplify deduplication
-            # This allows the barrier to detect duplicate batches regardless of which shard processed them
             base_uuid = message_uuid or str(uuid.uuid4())
-            
             for routing_key, shard_batch in shard_batches.items():
                 if not shard_batch:
                     continue
-                # Use the same UUID for all shards - simplifies deduplication downstream
-                outgoing_uuid = base_uuid
-                # log de size of the shard batch being sent for debugging purposes, add color to the log
-                logger.info(
-                    "\033[35m[SHARDING-ROUTER] Sending shard batch of size %s to routing key %s for client %s\033[0m",
-                    len(shard_batch),
-                    routing_key,
-                    client_id,
-                )
+                outgoing_uuid = self.add_sharding_id_to_uuid_if_missing(base_uuid, routing_key)
                 self.send_message(
                     client_id,
                     shard_batch,
@@ -217,6 +206,12 @@ class ShardingRouter(BaseWorker):
                 client_id,
                 self.num_shards,
             )
+
+    def add_sharding_id_to_uuid_if_missing(self, message_uuid: str, routing_key: str) -> str:
+        """Ensure the message UUID includes the sharding ID."""
+        if f"-{routing_key}" not in message_uuid:
+            return f"{message_uuid}-{routing_key}"
+        return message_uuid
 
     def cleanup(self) -> None:
         """Clean up resources."""
