@@ -688,6 +688,11 @@ def generate_worker_sections(
                 # Set REPLICA_COUNT to match the number of sharded workers
                 # This ensures the aggregator waits for EOFs from all sharded workers
                 environment["REPLICA_COUNT"] = str(sharded_counts[sharded_key])
+            
+            # Special handling for amount_filter_eof_barrier - enable batch deduplication
+            # This prevents duplicate batches from amount-filter-sharding-router from being forwarded
+            if key == "amount_filter_eof_barrier":
+                environment["ENABLE_BATCH_DEDUPLICATION"] = "true"
 
             # Special handling for sharded workers - fix queue names and add sharded flag
             # Check both by base_service_name and by key to ensure all sharded workers are detected
@@ -962,10 +967,6 @@ def generate_healthchecker_section(
         
         # Skip sharding routers for year_filter and items_year_filter because gateway does the sharding
         if key in ["year_filter_sharding_router", "items_year_filter_sharding_router"]:
-            continue
-        
-        # Skip time-filter-sharding-router from healthcheckers (not in original)
-        if key == "time_filter_sharding_router":
             continue
         
         total_count = worker_cfg.count

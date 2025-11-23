@@ -63,6 +63,7 @@ class ShardingRouter(BaseWorker):
             return None
         return str(message_uuid)
 
+
     def _mark_processed(self, client_id: str, message_uuid: str | None) -> None:
         """Mark a message as processed."""
         if message_uuid:
@@ -113,7 +114,7 @@ class ShardingRouter(BaseWorker):
 
         if message_uuid and self._processed_store.has_processed(client_id, message_uuid):
             logger.info(
-                "\033[33m[SHARDING-ROUTER] Duplicate batch %s for client %s detected; skipping %s messages\033[0m",
+                "\033[31m[SHARDING-ROUTER] Duplicate batch %s for client %s detected; skipping %s messages\033[0m",
                 message_uuid,
                 client_id,
                 batch_size,
@@ -129,12 +130,22 @@ class ShardingRouter(BaseWorker):
                     continue
                 shard_batches[routing_key].append(message)
 
+            # Use the same UUID base for all shards to simplify deduplication
+            # This allows the barrier to detect duplicate batches regardless of which shard processed them
             base_uuid = message_uuid or str(uuid.uuid4())
+            
             for routing_key, shard_batch in shard_batches.items():
                 if not shard_batch:
                     continue
-                # Preserve original batch UUID for traceability while making it unique per shard
-                outgoing_uuid = f"{base_uuid}-{routing_key}"
+                # Use the same UUID for all shards - simplifies deduplication downstream
+                outgoing_uuid = base_uuid
+                # log de size of the shard batch being sent for debugging purposes, add color to the log
+                logger.info(
+                    "\033[35m[SHARDING-ROUTER] Sending shard batch of size %s to routing key %s for client %s\033[0m",
+                    len(shard_batch),
+                    routing_key,
+                    client_id,
+                )
                 self.send_message(
                     client_id,
                     shard_batch,

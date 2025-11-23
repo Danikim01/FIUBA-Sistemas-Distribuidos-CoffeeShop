@@ -4,13 +4,14 @@
 
 import logging
 import os
-from typing import Any, Dict, Tuple, Optional
+from typing import Any, Dict, Optional
 import uuid
 
 from workers.base_worker import BaseWorker
 from workers.utils.worker_utils import run_main
 from workers.utils.message_utils import ClientId, is_eof_message, extract_message_uuid
 from workers.utils.eof_counter_store import EOFCounterStore
+from workers.utils.processed_message_store import ProcessedMessageStore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,18 +36,26 @@ class FilterEOFBarrier(BaseWorker):
         worker_label = f"{self.__class__.__name__}-{os.getenv('WORKER_ID', '0')}"        
         self._eof_counter_store = EOFCounterStore(worker_label)
         
+        # Optional batch deduplication for cases where sharding routers send duplicate batches
+        enable_batch_dedup = os.getenv('ENABLE_BATCH_DEDUPLICATION', 'false').lower() == 'true'
+        self._processed_store = None
+        if enable_batch_dedup:
+            self._processed_store = ProcessedMessageStore(worker_label)
+            logger.info(
+                "\033[33m[FILTER-EOF-BARRIER] Batch deduplication enabled with ProcessedMessageStore "
+                "to handle duplicate batches from sharding routers\033[0m"
+            )
+        
+        # Transaction counters per client for debugging
+        self._transaction_counters: Dict[str, int] = {}
+        self._duplicate_counters: Dict[str, int] = {}
+        
         logger.info(
             f"Filter EOF Barrier initialized - Input: {self.middleware_config.get_input_target()}, "
             f"Output: {self.middleware_config.get_output_target()}, "
             f"Replica count: {self.replica_count}"
         )
-        logger.info(
-            f"\033[33m[FILTER-EOF-BARRIER] Forwarding messages immediately, outputing single EOF after receiving all EOFs from replicas\033[0m"
-        )
-        logger.info(
-            f"\033[33m[FILTER-EOF-BARRIER] Robust deduplication enabled with two-phase commit persistence to handle message retries from filter workers\033[0m"
-        )
-    
+
     def _get_current_message_uuid(self) -> str | None:
         """Get the message UUID from the current message metadata."""
         metadata = self._get_current_message_metadata()
@@ -60,6 +69,7 @@ class FilterEOFBarrier(BaseWorker):
         return str(message_uuid)
     
     
+    
     def process_batch(self, batch: list, client_id: ClientId):
         """
         Process batch of messages - forward immediately.
@@ -68,6 +78,42 @@ class FilterEOFBarrier(BaseWorker):
             batch: List of messages to forward
             client_id: Client identifier
         """
+        message_uuid = self._get_current_message_uuid()
+        batch_size = len(batch) if isinstance(batch, list) else 1
+        
+        # Enhanced logging for debugging
+        logger.info(
+            f"[FILTER-EOF-BARRIER] Processing batch for client {client_id}, "
+            f"size: {batch_size}, message_uuid: {message_uuid}"
+        )
+        
+        # Check for duplicate batches if batch deduplication is enabled
+        if not self._processed_store:
+            logger.warning(
+                f"[FILTER-EOF-BARRIER] Batch deduplication is NOT enabled! "
+                f"This may cause duplicate batches to be forwarded. "
+                f"Client: {client_id}, Batch size: {batch_size}"
+            )
+        elif not message_uuid:
+            logger.warning(
+                f"[FILTER-EOF-BARRIER] Batch has no message_uuid! "
+                f"Cannot deduplicate. Client: {client_id}, Batch size: {batch_size}"
+            )
+        
+        if self._processed_store and message_uuid:
+            # Sharding routers now use the same UUID base for all shards, so we can deduplicate directly
+            if self._processed_store.has_processed(client_id, message_uuid):
+                # Track duplicate batches
+                self._duplicate_counters[client_id] = self._duplicate_counters.get(client_id, 0) + batch_size
+                logger.warning(
+                    f"\033[31m[FILTER-EOF-BARRIER] Duplicate batch detected! "
+                    f"UUID: {message_uuid}, Client: {client_id}, Batch size: {batch_size} messages - SKIPPING\033[0m"
+                )
+                logger.info(
+                    f"[FILTER-EOF-BARRIER] Duplicate stats for client {client_id}: "
+                    f"{self._duplicate_counters.get(client_id, 0)} duplicate messages so far"
+                )
+                return
         
         try:
             # Forward batch immediately without accumulating
@@ -80,6 +126,14 @@ class FilterEOFBarrier(BaseWorker):
                 # Single message in batch format
                 self.send_message(client_id=client_id, data=batch)
             
+            # Track transaction counts
+            self._transaction_counters[client_id] = self._transaction_counters.get(client_id, 0) + batch_size
+            
+            # Mark batch as processed if deduplication is enabled
+            # Sharding routers now use the same UUID for all shards, so we can mark directly
+            if self._processed_store and message_uuid:
+                self._processed_store.mark_processed(client_id, message_uuid)
+
         except Exception as e:
             logger.error(
                 f"\033[31m[FILTER-EOF-BARRIER] Failed to forward batch for client {client_id}, "
@@ -141,6 +195,24 @@ class FilterEOFBarrier(BaseWorker):
             # We clear ALL processed EOF UUIDs and reset counter when all EOFs are received.
             logger.info(f"\033[32m[FILTER-EOF-BARRIER] Clearing processed EOF state for client {client_id} after propagating EOF\033[0m")
             self._eof_counter_store.clear_client(client_id)
+            
+            # Also clear batch deduplication state if enabled
+            if self._processed_store:
+                logger.info(f"\033[32m[FILTER-EOF-BARRIER] Clearing batch deduplication state for client {client_id} after EOF\033[0m")
+                self._processed_store.clear_client(client_id)
+            
+            # Log final statistics
+            total_forwarded = self._transaction_counters.get(client_id, 0)
+            total_duplicates = self._duplicate_counters.get(client_id, 0)
+            logger.info(
+                f"\033[33m[FILTER-EOF-BARRIER] Final stats for client {client_id}: "
+                f"Forwarded: {total_forwarded} messages, "
+                f"Duplicates skipped: {total_duplicates} messages\033[0m"
+            )
+            
+            # Clear counters for this client
+            self._transaction_counters.pop(client_id, None)
+            self._duplicate_counters.pop(client_id, None)
 
 if __name__ == "__main__":
     run_main(FilterEOFBarrier)
