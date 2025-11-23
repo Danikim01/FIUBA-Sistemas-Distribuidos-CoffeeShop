@@ -689,11 +689,6 @@ def generate_worker_sections(
                 # This ensures the aggregator waits for EOFs from all sharded workers
                 environment["REPLICA_COUNT"] = str(sharded_counts[sharded_key])
             
-            # Special handling for amount_filter_eof_barrier - enable batch deduplication
-            # This prevents duplicate batches from amount-filter-sharding-router from being forwarded
-            if key == "amount_filter_eof_barrier":
-                environment["ENABLE_BATCH_DEDUPLICATION"] = "true"
-
             # Special handling for sharded workers - fix queue names and add sharded flag
             # Check both by base_service_name and by key to ensure all sharded workers are detected
             if "sharded" in meta["base_service_name"] or key in SHARDED_WORKER_KEYS:
