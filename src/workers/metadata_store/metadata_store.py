@@ -111,13 +111,33 @@ class MetadataStore(ABC):
         client_id: ClientId,
         item_id: str,
     ) -> str:
-        if not self.clients_done.is_client_done(client_id, block=True, timeout=10.0):
-            logger.warning(
-                "Timed out waiting for metadata queue %s to finish for client %s before retrieving %s",
-                self.name,
-                client_id,
-                item_id,
-            )
-            
-        # Devuelve el item aunque no esté done, porque puede que ya esté cargado
+        """
+        Obtiene un item, esperando a que termine el consumo si es necesario.
+        
+        Primero intenta obtener el item directamente (puede estar en cache o persistencia).
+        Si no está disponible y el consumo no ha terminado, espera con timeout.
+        """
+        # Primero intentar obtener el item directamente (puede estar en cache o persistencia)
+        item = self._get_item(client_id, item_id)
+        
+        # Si el item no es el valor por defecto, ya lo tenemos (en cache o persistencia)
+        # No necesitamos esperar al EOF
+        default_values = ("Unknown Birthday", "Unknown Store", "Unknown Item", "Unknown")
+        if item not in default_values:
+            return item
+        
+        # Si no tenemos el item, esperar a que termine el consumo (con timeout)
+        # pero solo si el consumo no ha terminado aún
+        if not self.clients_done.is_client_done(client_id, block=False):
+            # El consumo no ha terminado, esperar con timeout
+            if not self.clients_done.is_client_done(client_id, block=True, timeout=10.0):
+                logger.warning(
+                    "Timed out waiting for metadata queue %s to finish for client %s before retrieving %s. "
+                    "Item may not be available yet.",
+                    self.name,
+                    client_id,
+                    item_id,
+                )
+        
+        # Intentar obtener el item nuevamente (puede haberse cargado mientras esperábamos)
         return self._get_item(client_id, item_id)
