@@ -152,17 +152,51 @@ class RobustRabbitMQConnection:
                     logger.warning(f"Error closing channel: {e}")
     
     def close(self):
-        """Close the connection."""
+        """Close the connection gracefully, handling pika internal errors during shutdown."""
         with self._connection_lock:
+            if self._is_closed:
+                return  # Already closed
+            
             self._is_closed = True
-            if self._connection and not self._connection.is_closed:
-                try:
-                    self._connection.close()
-                    logger.info(f"Closed RabbitMQ connection to {self.host}:{self.port}")
-                except Exception as e:
-                    logger.warning(f"Error closing connection: {e}")
-                finally:
+            
+            if self._connection is None:
+                return
+            
+            # Check if connection is already closed
+            try:
+                if self._connection.is_closed:
                     self._connection = None
+                    return
+            except Exception:
+                # Connection object may be in an invalid state
+                self._connection = None
+                return
+            
+            # Try to close gracefully
+            try:
+                # Give pika a moment to finish any pending operations
+                # This helps avoid race conditions during shutdown
+                try:
+                    # Process any pending data events to flush buffers
+                    self._connection.process_data_events(time_limit=0.1)
+                except Exception:
+                    # Ignore errors during flush - connection may already be closing
+                    pass
+                
+                # Close the connection
+                self._connection.close()
+                logger.info(f"Closed RabbitMQ connection to {self.host}:{self.port}")
+            except (pika.exceptions.StreamLostError, pika.exceptions.ConnectionClosed, 
+                    pika.exceptions.AMQPConnectionError, IndexError, AttributeError) as e:
+                # These errors are expected during shutdown when pika is cleaning up
+                # IndexError can occur when pika tries to pop from empty deque during shutdown
+                # AttributeError can occur when pika's internal state is being cleaned up
+                logger.debug(f"Connection already closed or closing (expected during shutdown): {e}")
+            except Exception as e:
+                # Log other errors but don't raise - we're shutting down
+                logger.warning(f"Error closing connection (non-critical during shutdown): {e}")
+            finally:
+                self._connection = None
 
 
 class ConnectionPool:

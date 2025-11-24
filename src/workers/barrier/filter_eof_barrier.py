@@ -77,13 +77,7 @@ class FilterEOFBarrier(BaseWorker):
         """
         message_uuid = self._get_current_message_uuid()
         batch_size = len(batch) if isinstance(batch, list) else 1
-        
-        # Enhanced logging for debugging
-        logger.info(
-            f"[FILTER-EOF-BARRIER] Processing batch for client {client_id}, "
-            f"size: {batch_size}, message_uuid: {message_uuid}"
-        )
-        
+                
         # Check for duplicate batches (deduplication is always enabled)
         if not message_uuid:
             # CRITICAL: If batch has no UUID, we cannot deduplicate

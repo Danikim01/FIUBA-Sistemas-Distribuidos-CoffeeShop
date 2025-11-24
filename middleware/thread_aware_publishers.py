@@ -47,6 +47,7 @@ class ThreadAwareQueuePublisher:
 
         for queue in instances:
             with suppress(Exception):
+                # Suppress all errors during shutdown - connections may already be closing
                 queue.close()
 
     def _get_instance(self) -> RabbitMQMiddlewareQueue:
@@ -93,6 +94,7 @@ class ThreadAwareExchangePublisher:
 
         for exchange in instances:
             with suppress(Exception):
+                # Suppress all errors during shutdown - connections may already be closing
                 exchange.close()
 
     def _get_instance(self) -> RabbitMQMiddlewareExchange:

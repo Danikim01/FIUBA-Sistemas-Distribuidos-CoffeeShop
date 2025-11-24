@@ -71,13 +71,15 @@ class BaseWorker(ABC):
         self.shutdown_requested = True
         
         # Stop consuming immediately to prevent new messages
+        # This must be done before cleanup to ensure consumption stops cleanly
         try:
-            if hasattr(self.middleware_config, 'input_middleware'):
+            if hasattr(self.middleware_config, 'input_middleware') and self.middleware_config.input_middleware:
                 self.middleware_config.input_middleware.stop_consuming()
         except Exception as e:
             logger.warning(f"Error stopping consumption: {e}")
         
         # Clean up resources
+        # This will close all connections gracefully
         self.cleanup()
     
     def send_message(self, client_id: ClientId, data: Any, routing_key: str | None = None ,  **metadata):

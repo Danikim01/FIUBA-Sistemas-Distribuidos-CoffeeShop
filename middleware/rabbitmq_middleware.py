@@ -196,8 +196,12 @@ class _BaseRabbitMQMiddleware(MessageMiddleware):
             try:
                 if channel and getattr(channel, 'is_open', False):
                     channel.close()
+            except (pika.exceptions.StreamLostError, pika.exceptions.ConnectionClosed,
+                    pika.exceptions.AMQPConnectionError, IndexError, AttributeError):
+                # These errors are expected during shutdown
+                pass
             except Exception:
-                logger.debug("Error closing thread-local send channel", exc_info=True)
+                logger.debug("Error closing thread-local send channel (expected during shutdown)", exc_info=True)
             # remove attributes safely
             with suppress(Exception):
                 delattr(self._send_channel_local, 'channel')
@@ -209,12 +213,17 @@ class _BaseRabbitMQMiddleware(MessageMiddleware):
             try:
                 manager = self._send_connection_manager_local.manager
                 manager.close()
+            except (pika.exceptions.StreamLostError, pika.exceptions.ConnectionClosed,
+                    pika.exceptions.AMQPConnectionError, IndexError, AttributeError):
+                # These errors are expected during shutdown
+                pass
             except Exception:
-                logger.debug("Error closing thread-local send connection manager", exc_info=True)
+                logger.debug("Error closing thread-local send connection manager (expected during shutdown)", exc_info=True)
             with suppress(Exception):
                 delattr(self._send_connection_manager_local, 'manager')
 
     def _stop_consuming_threadsafe(self) -> None:
+        """Stop consuming in a thread-safe manner, handling pika internal errors."""
         with self._lock:
             channel = self._active_channel
             connection = self._active_connection
@@ -223,17 +232,34 @@ class _BaseRabbitMQMiddleware(MessageMiddleware):
             return
 
         def _stop() -> None:
-            with suppress(Exception):
-                if channel and not channel.is_closed:
-                    channel.stop_consuming()
-
-        if connection and not getattr(connection, 'is_closed', False):
+            """Stop consuming on the channel, suppressing expected errors during shutdown."""
             try:
-                connection.add_callback_threadsafe(_stop)
-                return
+                # Check if channel is still valid before stopping
+                if channel and hasattr(channel, 'is_closed') and not channel.is_closed:
+                    channel.stop_consuming()
+            except (pika.exceptions.StreamLostError, pika.exceptions.ConnectionClosed,
+                    pika.exceptions.AMQPConnectionError, IndexError, AttributeError):
+                # These errors are expected during shutdown
+                pass
+            except Exception:
+                # Suppress all other errors during shutdown
+                logger.debug("Error stopping consumption (expected during shutdown)", exc_info=True)
+
+        # Try to use thread-safe callback if connection is available
+        if connection:
+            try:
+                # Check if connection is still valid
+                if not getattr(connection, 'is_closed', False):
+                    connection.add_callback_threadsafe(_stop)
+                    return
+            except (AttributeError, IndexError, pika.exceptions.StreamLostError):
+                # Connection may be in an invalid state during shutdown
+                pass
             except Exception:  # noqa: BLE001
+                # Other errors - fall through to direct call
                 pass
 
+        # Fallback: call directly if thread-safe callback failed
         _stop()
 
     # ------------------------------------------------------------------
@@ -244,17 +270,30 @@ class _BaseRabbitMQMiddleware(MessageMiddleware):
         self._stop_consuming_threadsafe()
 
     def close(self) -> None:
+        """Close the middleware gracefully, ensuring consumption stops before closing connections."""
         self._stop_event.set()
+        self.consuming = False
+        
+        # Stop consuming first - this is critical to avoid race conditions
         self._stop_consuming_threadsafe()
-
+        
+        # Give pika time to process the stop_consuming call and clean up
+        # This helps avoid the IndexError: pop from empty deque issue
+        time.sleep(0.1)
+        
         # Clear active channel before closing connection
         self._clear_active_channel()
-        # Close send channel
+        
+        # Close send channel (thread-local)
         self._close_send_channel()
-        self.consuming = False
-
+        
+        # Close the main connection manager
         try:
             self._connection_manager.close()
+        except (pika.exceptions.StreamLostError, pika.exceptions.ConnectionClosed,
+                pika.exceptions.AMQPConnectionError, IndexError, AttributeError) as exc:
+            # These errors are expected during shutdown when pika is cleaning up
+            logger.debug(f"Connection already closed or closing (expected during shutdown): {exc}")
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"Error cerrando conexión: {exc}")
             # Don't raise exception during shutdown
@@ -398,15 +437,37 @@ class RabbitMQMiddlewareQueue(_BaseRabbitMQMiddleware):
                 else:
                     logger.exception("Error de sistema en '%s': %s", self.queue_name, exc)
                     raise MessageMiddlewareMessageError(f"Error de sistema: {exc}") from exc
+            except AttributeError as exc:
+                # Handle pika internal AttributeError during shutdown (e.g., 'NoneType' object has no attribute 'clear')
+                # This can occur when pika's internal state is being cleaned up during connection close
+                if self._stop_event.is_set():
+                    logger.debug("AttributeError during shutdown (expected): %s", exc)
+                    break
+                else:
+                    logger.exception("Error interno iniciando consumo en '%s': %s", self.queue_name, exc)
+                    raise MessageMiddlewareMessageError(f"Error interno iniciando consumo: {exc}") from exc
             except Exception as exc:  # noqa: BLE001
+                # If shutdown was requested, suppress errors during cleanup
+                if self._stop_event.is_set():
+                    logger.debug("Error durante shutdown (esperado): %s", exc)
+                    break
                 logger.exception("Error interno iniciando consumo en '%s': %s", self.queue_name, exc)
                 raise MessageMiddlewareMessageError(f"Error interno iniciando consumo: {exc}") from exc
             finally:
                 self.consuming = False
                 self._clear_active_channel()
-                if channel and getattr(channel, 'is_open', False):
-                    with suppress(Exception):
-                        channel.close()
+                if channel:
+                    try:
+                        # Check if channel is still valid before closing
+                        if getattr(channel, 'is_open', False):
+                            channel.close()
+                    except (pika.exceptions.StreamLostError, pika.exceptions.ConnectionClosed,
+                            pika.exceptions.AMQPConnectionError, IndexError, AttributeError):
+                        # These errors are expected during shutdown
+                        pass
+                    except Exception:
+                        # Suppress all other errors during channel cleanup
+                        logger.debug("Error closing channel (expected during shutdown)", exc_info=True)
 
             if self._stop_event.is_set():
                 break
@@ -669,15 +730,37 @@ class RabbitMQMiddlewareExchange(_BaseRabbitMQMiddleware):
                 else:
                     logger.exception("Error de sistema en '%s': %s", self.exchange_name, exc)
                     raise MessageMiddlewareMessageError(f"Error de sistema: {exc}") from exc
+            except AttributeError as exc:
+                # Handle pika internal AttributeError during shutdown (e.g., 'NoneType' object has no attribute 'clear')
+                # This can occur when pika's internal state is being cleaned up during connection close
+                if self._stop_event.is_set():
+                    logger.debug("AttributeError during shutdown (expected): %s", exc)
+                    break
+                else:
+                    logger.exception("Error interno iniciando consumo en '%s': %s", self.exchange_name, exc)
+                    raise MessageMiddlewareMessageError(f"Error interno iniciando consumo: {exc}") from exc
             except Exception as exc:  # noqa: BLE001
+                # If shutdown was requested, suppress errors during cleanup
+                if self._stop_event.is_set():
+                    logger.debug("Error durante shutdown (esperado): %s", exc)
+                    break
                 logger.exception("Error interno iniciando consumo en '%s': %s", self.exchange_name, exc)
                 raise MessageMiddlewareMessageError(f"Error interno iniciando consumo: {exc}") from exc
             finally:
                 self.consuming = False
                 self._clear_active_channel()
-                if channel and getattr(channel, 'is_open', False):
-                    with suppress(Exception):
-                        channel.close()
+                if channel:
+                    try:
+                        # Check if channel is still valid before closing
+                        if getattr(channel, 'is_open', False):
+                            channel.close()
+                    except (pika.exceptions.StreamLostError, pika.exceptions.ConnectionClosed,
+                            pika.exceptions.AMQPConnectionError, IndexError, AttributeError):
+                        # These errors are expected during shutdown
+                        pass
+                    except Exception:
+                        # Suppress all other errors during channel cleanup
+                        logger.debug("Error closing channel (expected during shutdown)", exc_info=True)
 
             if self._stop_event.is_set():
                 break
