@@ -19,4 +19,4 @@ fi
 
 docker compose up --build -d --force-recreate --remove-orphans
 sleep 3
-./kill_random_workers.sh -s -f -e -r
+./kill_random_workers.sh -s -f -e -r -g

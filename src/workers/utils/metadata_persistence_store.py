@@ -69,6 +69,12 @@ class MetadataPersistenceStore:
     def _load_all_clients(self) -> None:
         """Carga todos los datos de clientes desde disco al iniciar."""
         client_files = list(self._store_dir.glob("*.csv"))
+        logger.debug(
+            "[LOAD-ALL] Found %d CSV files for %s in directory: %s",
+            len(client_files),
+            self.store_type,
+            self._store_dir
+        )
         
         loaded_count = 0
         total_items = 0
@@ -82,19 +88,28 @@ class MetadataPersistenceStore:
                     self._cache[client_id] = data
                     loaded_count += 1
                     total_items += len(data)
+                    # Count unique items (duplicates are handled by dict, so len(data) is already unique)
+                    unique_count = len(data)
+                    # Log with full client_id (no truncation)
                     logger.info(
-                        f"\033[32m[LOAD-ALL] Loaded {len(data)} {self.store_type} items "
-                        f"for client {client_id}\033[0m"
+                        "[LOAD-ALL] Loaded %d unique %s items for client %s",
+                        unique_count,
+                        self.store_type,
+                        client_id
                     )
             except (ValueError, OSError, csv.Error) as exc:
                 logger.warning(
-                    f"[LOAD-ALL] Failed to load client file {client_file}: {exc}"
+                    "[LOAD-ALL] Failed to load client file %s: %s",
+                    client_file,
+                    exc
                 )
         
         if loaded_count > 0:
             logger.info(
-                f"[LOAD-ALL] Loaded {self.store_type} metadata for {loaded_count} clients "
-                f"({total_items} total items)"
+                "[LOAD-ALL] Loaded %s metadata for %d clients (%d total items)",
+                self.store_type,
+                loaded_count,
+                total_items
             )
     
     def _load_client_from_disk(self, client_id: ClientId) -> Dict[str, str]:
