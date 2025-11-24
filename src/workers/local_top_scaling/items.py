@@ -98,5 +98,19 @@ class ItemsWorker(AggregatorWorker):
 
         return [payload]
 
+    def handle_client_reset(self, client_id: ClientId) -> None:
+        """Drop any partial state for a disconnected client."""
+        with self._state_lock:
+            self._quantity_totals.pop(client_id, None)
+            self._profit_totals.pop(client_id, None)
+        logger.info("[CONTROL] Cleared Items state for client %s", client_id)
+
+    def handle_reset_all_clients(self) -> None:
+        """Drop all state across clients."""
+        with self._state_lock:
+            self._quantity_totals.clear()
+            self._profit_totals.clear()
+        logger.info("[CONTROL] Cleared Items state for all clients")
+
 if __name__ == '__main__':
     run_main(ItemsWorker)

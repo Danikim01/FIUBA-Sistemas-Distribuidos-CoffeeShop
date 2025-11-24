@@ -343,6 +343,41 @@ class QueueManager:
         except Exception as exc:
             logger.error(f"Failed to propagate EOF to menu items queue for client {client_id}: {exc}")
             raise
+
+    def _broadcast_control(self, payload: dict) -> None:
+        """Send a control payload to every pipeline."""
+        publishers = [
+            self.transactions_queue,
+            self.users_queue,
+            self.transaction_items_queue,
+            self.menu_items_queue,
+            self.stores_exchange,
+        ]
+        for publisher in publishers:
+            try:
+                publisher.send(payload)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Failed to broadcast control message via %s: %s", getattr(publisher, "queue_name", getattr(publisher, "exchange_name", "unknown")), exc)
+                raise
+
+    def propagate_client_reset(self, client_id: str) -> None:
+        """Tell all workers to drop state for a specific client."""
+        control_message = {
+            "type": "CLIENT_RESET",
+            "client_id": client_id,
+            "reason": "gateway_detected_disconnect",
+        }
+        logger.info("Propagating client reset control message for %s", client_id)
+        self._broadcast_control(control_message)
+
+    def propagate_global_reset(self) -> None:
+        """Tell all workers to drop state for every client."""
+        control_message = {
+            "type": "RESET_ALL",
+            "reason": "gateway_startup_cleanup",
+        }
+        logger.info("Propagating global reset control message")
+        self._broadcast_control(control_message)
     
     def close(self) -> None:
         """Close all RabbitMQ publishers created by the manager."""

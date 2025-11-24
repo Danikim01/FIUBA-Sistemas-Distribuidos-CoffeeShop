@@ -92,3 +92,12 @@ class ProcessedMessageStore:
             path = self._client_path(client_id)
             with contextlib.suppress(Exception):
                 path.unlink()
+
+    def clear_all(self) -> None:
+        """Remove all cached UUIDs for every client."""
+        with self._lock:
+            self._cache.clear()
+            if self._store_dir.exists():
+                for path in self._store_dir.glob("*.json"):
+                    with contextlib.suppress(Exception):
+                        path.unlink()

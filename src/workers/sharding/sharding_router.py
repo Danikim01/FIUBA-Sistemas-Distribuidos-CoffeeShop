@@ -188,5 +188,18 @@ class ShardingRouter(BaseWorker):
         # Call parent cleanup
         super().cleanup()
 
+    def handle_client_reset(self, client_id: ClientId) -> None:
+        """Drop any pending batches for a disconnected client."""
+        with self.batch_lock:
+            if client_id in self.batches:
+                del self.batches[client_id]
+        logger.info("[CONTROL] ShardingRouter dropped pending batches for client %s", client_id)
+
+    def handle_reset_all_clients(self) -> None:
+        """Drop all pending batches."""
+        with self.batch_lock:
+            self.batches.clear()
+        logger.info("[CONTROL] ShardingRouter dropped all pending batches")
+
 if __name__ == '__main__':
     run_main(ShardingRouter)

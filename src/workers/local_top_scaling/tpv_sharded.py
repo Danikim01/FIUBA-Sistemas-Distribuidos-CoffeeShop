@@ -339,6 +339,27 @@ class ShardedTPVWorker(AggregatorWorker):
             return None
         return str(message_uuid)
 
+    def handle_client_reset(self, client_id: ClientId) -> None:
+        """Drop any partial TPV state for a disconnected client."""
+        with self._state_lock:
+            self.partial_tpv.pop(client_id, None)
+            self._clients_with_eof.discard(client_id)
+            self.state_manager.clear_last_processed_message(client_id)
+            self.state_manager.drop_empty_client_state(client_id)
+            self.state_manager.remove_client_files(client_id)
+            self.state_manager.persist_state(client_id)
+        logger.info("[CONTROL] Cleared TPV state for client %s", client_id)
+
+    def handle_reset_all_clients(self) -> None:
+        """Drop all TPV state across clients."""
+        with self._state_lock:
+            self.partial_tpv.clear()
+            self._clients_with_eof.clear()
+            self.state_manager._last_processed_message.clear()
+            self.state_manager.remove_all_client_files()
+            self.state_manager.persist_state()
+        logger.info("[CONTROL] Cleared TPV state for all clients")
+
 
 if __name__ == '__main__':
     run_main(ShardedTPVWorker)

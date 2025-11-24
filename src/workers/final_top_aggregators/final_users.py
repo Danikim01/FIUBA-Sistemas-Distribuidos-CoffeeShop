@@ -200,6 +200,26 @@ class TopClientsBirthdaysAggregator(AggregatorWorker):
         except Exception:  # noqa: BLE001
             logger.warning("Failed to close extra sources", exc_info=True)
 
+    def handle_client_reset(self, client_id: ClientId) -> None:
+        """Drop any partial aggregation for a disconnected client."""
+        with self._state_lock:
+            self.recieved_payloads.pop(client_id, None)
+            with self.eof_count_lock:
+                self.eof_count_per_client.pop(client_id, None)
+            self.stores_source.reset_state(client_id)
+            self.birthdays_source.reset_state(client_id)
+        logger.info("[CONTROL] Cleared Top Clients aggregator state for client %s", client_id)
+
+    def handle_reset_all_clients(self) -> None:
+        """Drop all aggregation state."""
+        with self._state_lock:
+            self.recieved_payloads.clear()
+            with self.eof_count_lock:
+                self.eof_count_per_client.clear()
+            self.stores_source.reset_all()
+            self.birthdays_source.reset_all()
+        logger.info("[CONTROL] Cleared Top Clients aggregator state for all clients")
+
 
 if __name__ == '__main__':
     run_main(TopClientsBirthdaysAggregator)

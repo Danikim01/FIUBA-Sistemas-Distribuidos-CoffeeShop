@@ -30,6 +30,11 @@ class CoffeeShopGateway:
         
         # Initialize components
         self.queue_manager = QueueManager(self.config)
+        # Siempre al iniciar mando un reset global para no tener que manejar estado en gateway
+        try:
+            self.queue_manager.propagate_global_reset()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to propagate global reset on startup: %s", exc)
         self.client_handler = ClientHandler(self.queue_manager)
         
         # Server state

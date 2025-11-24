@@ -22,3 +22,7 @@ class Done:
         done_event = self.client_done.setdefault(client_id, threading.Event())
         if not done_event.is_set():
             done_event.set()
+
+    def reset_all(self):
+        """Clear tracking for all clients."""
+        self.client_done.clear()

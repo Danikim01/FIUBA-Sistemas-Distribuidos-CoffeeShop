@@ -2,7 +2,13 @@ from abc import ABC, abstractmethod
 import logging
 import threading
 from typing import Any
-from message_utils import ClientId, extract_data_and_client_id, is_eof_message
+from message_utils import (
+    ClientId,
+    extract_data_and_client_id,
+    is_eof_message,
+    is_client_reset_message,
+    is_reset_all_clients_message,
+)
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue
 from workers.extra_source.done import Done
 
@@ -35,6 +41,17 @@ class ExtraSource(ABC):
             try:
                 client_id, data = extract_data_and_client_id(message)
                 self.current_client_id = client_id
+
+                if is_reset_all_clients_message(message):
+                    logger.info("[CONTROL] Extra source %s received global reset", self.name)
+                    self.reset_all()
+                    return
+
+                if is_client_reset_message(message):
+                    logger.info("[CONTROL] Extra source %s resetting client %s", self.name, client_id)
+                    self.reset_state(client_id)
+                    self.clients_done.set_done(client_id)
+                    return
 
                 if self.clients_done.is_client_done(client_id):
                     logger.info(f"Extra source {self.name} already done, ignoring message")
@@ -105,6 +122,12 @@ class ExtraSource(ABC):
     @abstractmethod
     def reset_state(self, client_id: ClientId):
         raise NotImplementedError
+
+    def reset_all(self): # esto esta bien porque todos los xtra source tienen "data"
+        """Best-effort reset for all tracked clients."""
+        if hasattr(self, "data") and isinstance(self.data, dict): # pyright: ignore[reportAttributeAccessIssue]
+            self.data.clear() # pyright: ignore[reportAttributeAccessIssue]
+        self.clients_done.reset_all()
 
     def get_item_when_done(
         self,

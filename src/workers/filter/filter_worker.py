@@ -94,3 +94,13 @@ class FilterWorker(BaseWorker):
         """Clear processed state when EOF is received and propagate downstream."""
         self._processed_store.clear_client(client_id)
         return super().handle_eof(message, client_id)
+
+    def handle_client_reset(self, client_id: str) -> None:
+        """Drop processed UUIDs for a single client."""
+        self._processed_store.clear_client(client_id)
+        logger.info("[CONTROL] Cleared processed message store for client %s", client_id)
+
+    def handle_reset_all_clients(self) -> None:
+        """Drop all processed UUIDs."""
+        self._processed_store.clear_all()
+        logger.info("[CONTROL] Cleared processed message store for all clients")

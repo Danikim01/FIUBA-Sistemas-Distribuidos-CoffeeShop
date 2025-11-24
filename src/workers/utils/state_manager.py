@@ -538,6 +538,25 @@ class StateManager(Generic[T]):
         """
         # Default implementation - subclasses should override this
         pass
+
+    def remove_client_files(self, client_id: ClientId) -> None:
+        """Remove persisted state files for a specific client."""
+        client_path = self._get_client_state_path(client_id)
+        backup_path = client_path.with_suffix(".backup.json")
+        temp_path = client_path.with_suffix(".temp.json")
+        for path in (client_path, backup_path, temp_path):
+            with contextlib.suppress(Exception):
+                path.unlink()
+
+    def remove_all_client_files(self) -> None:
+        """Remove all persisted client files and metadata."""
+        for pattern in ("client_*.json", "client_*.backup.json", "client_*.temp.json"):
+            for path in self._state_dir.glob(pattern):
+                with contextlib.suppress(Exception):
+                    path.unlink()
+        for meta_path in (self._metadata_path, self._metadata_backup_path, self._metadata_temp_path):
+            with contextlib.suppress(Exception):
+                meta_path.unlink()
     
     def clone_client_state(self, client_id: ClientId) -> Any:
         """
@@ -993,5 +1012,3 @@ class ItemsStateManager(StateManager[tuple[DefaultDict[ClientId, DefaultDict[str
         self.profit_totals[client_id] = restored_profit
         
         self.mark_client_modified(client_id)
-
-

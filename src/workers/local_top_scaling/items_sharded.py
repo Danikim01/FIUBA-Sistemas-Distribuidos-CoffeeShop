@@ -331,6 +331,29 @@ class ShardedItemsWorker(AggregatorWorker):
             return None
         return str(message_uuid)
 
+    def handle_client_reset(self, client_id: ClientId) -> None:
+        """Drop any partial items state for a disconnected client."""
+        with self._state_lock:
+            self._quantity_totals.pop(client_id, None)
+            self._profit_totals.pop(client_id, None)
+            self._clients_with_eof.discard(client_id)
+            self.state_manager.clear_last_processed_message(client_id)
+            self.state_manager.drop_empty_client_state(client_id)
+            self.state_manager.remove_client_files(client_id)
+            self.state_manager.persist_state(client_id)
+        logger.info("[CONTROL] Cleared Items state for client %s", client_id)
+
+    def handle_reset_all_clients(self) -> None:
+        """Drop all items state across clients."""
+        with self._state_lock:
+            self._quantity_totals.clear()
+            self._profit_totals.clear()
+            self._clients_with_eof.clear()
+            self.state_manager._last_processed_message.clear()
+            self.state_manager.remove_all_client_files()
+            self.state_manager.persist_state()
+        logger.info("[CONTROL] Cleared Items state for all clients")
+
 
 if __name__ == '__main__':
     run_main(ShardedItemsWorker)

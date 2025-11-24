@@ -8,6 +8,9 @@ logger = logging.getLogger(__name__)
 
 ClientId = str
 
+RESET_CLIENT_TYPE = "CLIENT_RESET"
+RESET_ALL_TYPE = "RESET_ALL"
+
 def is_eof_message(message: Any) -> bool:
     """Check if a message is an EOF (End Of File) control message.
     
@@ -88,3 +91,17 @@ def extract_eof_metadata(message: Dict[str, Any]) -> Dict[str, Any]:
     """
     excluded_fields = {'client_id', 'type', 'data'}
     return {k: v for k, v in message.items() if k not in excluded_fields}
+
+
+def _is_type(message: Any, expected_type: str) -> bool:
+    return isinstance(message, dict) and str(message.get('type', '')).upper() == expected_type.upper()
+
+
+def is_client_reset_message(message: Any) -> bool:
+    """Detect a control message that instructs workers to reset a single client."""
+    return _is_type(message, RESET_CLIENT_TYPE)
+
+
+def is_reset_all_clients_message(message: Any) -> bool:
+    """Detect a control message that instructs workers to reset all clients."""
+    return _is_type(message, RESET_ALL_TYPE)

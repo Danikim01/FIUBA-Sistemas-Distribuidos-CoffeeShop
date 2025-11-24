@@ -12,6 +12,8 @@ from message_utils import ( # pyright: ignore[reportMissingImports]
     ClientId,
     extract_data_and_client_id,
     is_eof_message,
+    is_client_reset_message,
+    is_reset_all_clients_message,
     create_message_with_metadata,
 )
 
@@ -133,6 +135,16 @@ class BaseWorker(ABC):
                     self._current_message_metadata = message
 
                     client_id, actual_data = extract_data_and_client_id(message)
+
+                    if is_client_reset_message(message):
+                        logger.info("Received client reset control message for %s", client_id)
+                        self.handle_client_reset(client_id)
+                        return
+
+                    if is_reset_all_clients_message(message):
+                        logger.info("Received global reset control message")
+                        self.handle_reset_all_clients()
+                        return
                     
                     if is_eof_message(message):
                         return self.handle_eof(message, client_id)
@@ -231,3 +243,18 @@ class BaseWorker(ABC):
             yield
         finally:
             self._end_pause()
+
+    def handle_client_reset(self, client_id: ClientId) -> None:
+        """Reset state for a specific client. Override in stateful workers."""
+        logger.info(
+            "[CONTROL] %s received client reset for %s but has no state to clear",
+            self.__class__.__name__,
+            client_id,
+        )
+
+    def handle_reset_all_clients(self) -> None:
+        """Reset state for all clients. Override in stateful workers."""
+        logger.info(
+            "[CONTROL] %s received global reset but has no state to clear",
+            self.__class__.__name__,
+        )
