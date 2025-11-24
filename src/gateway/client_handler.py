@@ -22,6 +22,8 @@ class ClientHandler:
         self.queue_manager = queue_manager
         self.message_handlers = MessageHandlers(queue_manager)
         self.session_manager = ClientSessionManager()
+        # Track seen transaction_ids per client for AMOUNT_FILTER_TRANSACTIONS deduplication
+        self._seen_transaction_ids: dict[str, set[str]] = {}
     
     def handle_client(self, client_socket: socket.socket, address: tuple, shutdown_event: threading.Event) -> None:
         """Handle a client connection with unique identification and result routing."""
@@ -119,6 +121,10 @@ class ClientHandler:
         """Consume results from RabbitMQ and forward them to the specific client via TCP."""
         logger.info(f"Forwarding results to client {client_id}")
 
+        # Initialize seen transaction_ids set for this client
+        seen_transaction_ids = set()
+        self._seen_transaction_ids[client_id] = seen_transaction_ids
+        
         eof_sent = False
 
         def handle_payload(payload: Any) -> None:
@@ -165,6 +171,45 @@ class ClientHandler:
                 for result_payload in normalized_messages:
                     enriched_payload = dict(result_payload)
                     enriched_payload['client_id'] = client_id
+                    
+                    # Deduplicate AMOUNT_FILTER_TRANSACTIONS by transaction_id across all batches
+                    result_type = enriched_payload.get('type', '').upper()
+                    if result_type == 'AMOUNT_FILTER_TRANSACTIONS':
+                        results = enriched_payload.get('results', [])
+                        if isinstance(results, list) and results:
+                            # Deduplicate by transaction_id, keeping first occurrence across all batches
+                            deduplicated = []
+                            duplicates_count = 0
+                            for transaction in results:
+                                if isinstance(transaction, dict):
+                                    transaction_id = transaction.get('transaction_id')
+                                    if transaction_id is not None:
+                                        transaction_id_str = str(transaction_id)
+                                        if transaction_id_str not in seen_transaction_ids:
+                                            seen_transaction_ids.add(transaction_id_str)
+                                            deduplicated.append(transaction)
+                                        else:
+                                            duplicates_count += 1
+                                    else:
+                                        # If no transaction_id, include it (shouldn't happen but handle gracefully)
+                                        deduplicated.append(transaction)
+                                else:
+                                    deduplicated.append(transaction)
+                            
+                            enriched_payload['results'] = deduplicated
+                            if duplicates_count > 0:
+                                logger.info(
+                                    "\033[1;91m" 
+                                    "GATEWAY DEDUPLICATED %s DUPLICATE TRANSACTIONS for client %s (TYPE: %s). "
+                                    "ORIGINAL COUNT: %s, DEDUPLICATED COUNT: %s"
+                                    "\033[0m",
+                                    duplicates_count,
+                                    client_id,
+                                    result_type,
+                                    len(results),
+                                    len(deduplicated)
+                                )
+                    
                     logger.info(
                         "Gateway sending normalized result to client %s: type=%s, results_count=%s",
                         client_id,
@@ -186,6 +231,8 @@ class ClientHandler:
         except Exception as exc:
             logger.error(f"Error while consuming results stream for client {client_id}: {exc}")
         finally:
+            # Clean up seen transaction_ids for this client
+            self._seen_transaction_ids.pop(client_id, None)
             if not eof_sent:
                 try:
                     self._send_json_line(client_socket, {'type': 'EOF', 'client_id': client_id})
