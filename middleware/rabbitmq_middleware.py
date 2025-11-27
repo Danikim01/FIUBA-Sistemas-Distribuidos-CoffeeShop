@@ -593,7 +593,7 @@ class RabbitMQMiddlewareExchange(_BaseRabbitMQMiddleware):
         channel.exchange_declare(
             exchange=self.exchange_name,
             exchange_type=self.exchange_type,
-            durable=False,
+            durable=True,
         )
 
         shared_queue = bool(self._queue_override)
@@ -788,7 +788,7 @@ class RabbitMQMiddlewareExchange(_BaseRabbitMQMiddleware):
                 channel.exchange_declare(
                     exchange=self.exchange_name,
                     exchange_type=self.exchange_type,
-                    durable=False,
+                    durable=True,
                 )
 
                 # Determine routing key

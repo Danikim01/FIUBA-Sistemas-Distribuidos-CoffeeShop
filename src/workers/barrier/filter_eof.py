@@ -120,8 +120,7 @@ class FilterEOFBarrier(BaseWorker):
             
             # Mark batch as processed (deduplication is always enabled)
             # Sharding routers now use the same UUID for all shards, so we can mark directly
-            if message_uuid:
-                self._processed_store.mark_processed(client_id, message_uuid)
+            self._processed_store.mark_processed(client_id, message_uuid)
 
         except Exception as e:
             logger.error(
