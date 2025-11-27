@@ -159,11 +159,12 @@ class QueueManager:
         )
         
         # Stores exchange publisher per thread
+        # Use fanout exchange so all aggregators receive all messages
         self.stores_exchange = ThreadAwareExchangePublisher(
             lambda: RabbitMQMiddlewareExchange(
                 exchange_name=self.config.stores_exchange_name,
-                exchange_type='direct',
-                route_keys=[self.config.stores_exchange_name],
+                exchange_type='fanout',
+                route_keys=[],  # Fanout ignores routing keys
                 **connection_params,
             )
         )

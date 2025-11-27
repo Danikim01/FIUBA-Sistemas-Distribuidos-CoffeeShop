@@ -38,6 +38,7 @@ class MetadataStore(ABC):
 
     def _start_consuming(self):
         """Start consuming messages from the metadata queue."""
+        import time
 
         def on_message(message):
             try:
@@ -86,10 +87,41 @@ class MetadataStore(ABC):
                 )
                 raise
 
-        try:
-            self.middleware.start_consuming(on_message)
-        except Exception as exc:  # noqa: BLE001
-            logger.error(f"Error consuming from {self.name}: Error interno iniciando consumo: Error procesando mensaje: {exc}")
+        # Loop de reintento para el thread de metadata
+        retry_count = 0
+        max_retry_delay = 60
+        base_retry_delay = 2
+        
+        while True:  # Loop infinito para thread daemon
+            try:
+                if retry_count > 0:
+                    logger.info(f"[METADATA-STORE {self.name}] Starting consumption (reconnection attempt {retry_count})")
+                else:
+                    logger.info(f"[METADATA-STORE {self.name}] Starting consumption")
+                
+                self.middleware.start_consuming(on_message)
+                
+                # Si llegamos aquí, el consumo se detuvo
+                logger.warning(f"Consumption stopped for metadata store {self.name}, will retry...")
+                retry_count += 1
+                wait_time = min(max_retry_delay, base_retry_delay * (2 ** min(retry_count - 1, 5)))
+                logger.info(f"Waiting {wait_time} seconds before retrying metadata consumption for {self.name}...")
+                time.sleep(wait_time)
+                
+            except KeyboardInterrupt:
+                logger.info(f"Metadata store {self.name} interrupted")
+                break
+            except Exception as exc:
+                logger.error(f"Error consuming from {self.name}: {exc}", exc_info=True)
+                retry_count += 1
+                wait_time = min(max_retry_delay, base_retry_delay * (2 ** min(retry_count - 1, 5)))
+                logger.info(f"Error in metadata store {self.name}, waiting {wait_time} seconds before retrying...")
+                time.sleep(wait_time)
+            else:
+                # Reset retry count on successful connection
+                if retry_count > 0:
+                    logger.info(f"Successfully reconnected metadata store {self.name}, resetting retry count")
+                    retry_count = 0
 
     def start_consuming(self):
         """Start the consuming thread."""

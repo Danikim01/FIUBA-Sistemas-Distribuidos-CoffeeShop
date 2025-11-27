@@ -109,11 +109,13 @@ class TPVAggregator(ProcessWorker):
     def process_batch(self, batch: list[Dict[str, Any]], client_id: ClientId):
         """Process a batch with deduplication and metadata readiness check."""
         # Check if all metadata EOFs have been received for this client
+        metadata_state = self.metadata_eof_state.get_metadata_state(client_id)
         if not self.metadata_eof_state.are_all_metadata_done(client_id):
             # Not all metadata EOFs received yet, reject and requeue the message
             logger.info(
                     f"\033[91m[TPV-AGGREGATOR] Not all metadata EOFs received for client {client_id}, "
-                    f"requeuing transaction batch\033[0m"
+                    f"requeuing transaction batch. Required: {self.metadata_eof_state.required_metadata_types}, "
+                    f"Current state: {metadata_state}\033[0m"
             )
             raise InterruptedError(
                 f"\033[91mMetadata not ready for client {client_id}, message will be requeued\033[0m"

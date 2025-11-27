@@ -64,13 +64,14 @@ class MiddlewareConfig:
         self,
         name: str,
         queue_name: Optional[str] = None,
-        route_keys: Optional[list[str]] = None
+        route_keys: Optional[list[str]] = None,
+        exchange_type: str = 'direct'
     ) -> RabbitMQMiddlewareExchange:
         return RabbitMQMiddlewareExchange(
             host=self.rabbitmq_host,
             exchange_name=name,
             route_keys=route_keys or [name],
-            exchange_type='direct',
+            exchange_type=exchange_type,
             port=self.rabbitmq_port,
             queue_name=queue_name,
             prefetch_count=self.prefetch_count

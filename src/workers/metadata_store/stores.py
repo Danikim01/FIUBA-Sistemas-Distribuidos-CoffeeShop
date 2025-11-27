@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 from typing import Dict
 from message_utils import ClientId
 from middleware_config import MiddlewareConfig
@@ -20,7 +21,33 @@ class StoresMetadataStore(MetadataStore):
             eof_state_store: Optional MetadataEOFStateStore for tracking EOFs
         """ 
         stores_exchange = os.getenv('STORES_EXCHANGE', 'stores_raw').strip()
-        middleware = middleware_config.create_exchange(stores_exchange)
+        
+        # Each aggregator needs its own queue to receive ALL messages (fanout behavior)
+        # Determine queue name: use STORES_QUEUE env var if set, otherwise infer from script name
+        stores_queue = os.getenv('STORES_QUEUE', '').strip()
+        if not stores_queue:
+            # Infer worker type from script name for unique queue per aggregator
+            script_name = sys.argv[0] if sys.argv else ''
+            if 'tpv' in script_name.lower():
+                worker_type = 'tpv'
+            elif 'top_clients' in script_name.lower():
+                worker_type = 'top_clients'
+            elif 'top_items' in script_name.lower():
+                worker_type = 'top_items'
+            else:
+                # Fallback: use a generic name
+                worker_type = 'aggregator'
+            stores_queue = f'{stores_exchange}_{worker_type}'
+        
+        logger.info(f"[STORES-METADATA] Using queue '{stores_queue}' for exchange '{stores_exchange}' (fanout)")
+        
+        # Use fanout exchange so all aggregators receive all messages
+        middleware = middleware_config.create_exchange(
+            stores_exchange,
+            queue_name=stores_queue,
+            exchange_type='fanout',
+            route_keys=[]  # Fanout ignores routing keys
+        )
         super().__init__(stores_exchange, middleware, eof_state_store=eof_state_store, metadata_type='stores')
         
         # Cache en memoria para acceso rápido

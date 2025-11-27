@@ -169,8 +169,14 @@ class MetadataEOFStateStore:
         
         if loaded_count > 0:
             logger.info(
-                f"[METADATA-EOF-STATE] Loaded EOF state for {loaded_count} clients"
+                f"[METADATA-EOF-STATE] Loaded EOF state for {loaded_count} clients. "
+                f"Required metadata types: {self.required_metadata_types}"
             )
+            # Log detailed state for debugging
+            for client_id, state in self._cache.items():
+                logger.info(
+                    f"[METADATA-EOF-STATE] Client {client_id} state: {state}"
+                )
     
     def _load_client(self, client_id: ClientId) -> Dict[str, bool]:
         """Carga el estado de un cliente (desde cache o disco)."""
@@ -283,8 +289,18 @@ class MetadataEOFStateStore:
             metadata_state[metadata_type] = True
             self._cache[client_id] = metadata_state
             
+            logger.info(
+                f"[METADATA-EOF-STATE] Marked {metadata_type} as done for client {client_id}. "
+                f"Current state: {metadata_state}, Required: {self.required_metadata_types}"
+            )
+            
             # Persistir atómicamente
             self._persist_client_atomic(client_id, metadata_state)
+            
+            logger.info(
+                f"[METADATA-EOF-STATE] Persisted state for client {client_id}. "
+                f"All required metadata done: {self.are_all_metadata_done(client_id)}"
+            )
             
             logger.info(
                 f"\033[92m[METADATA-EOF-STATE] Marked {metadata_type} as done for client {client_id}\033[0m"
@@ -306,9 +322,9 @@ class MetadataEOFStateStore:
             # Verificar que todos los tipos requeridos estén done
             for metadata_type in self.required_metadata_types:
                 if not metadata_state.get(metadata_type, False):
-                    logger.debug(
+                    logger.info(
                         f"[METADATA-EOF-STATE] Client {client_id} not ready: {metadata_type} not done yet. "
-                        f"State: {metadata_state}"
+                        f"Required types: {self.required_metadata_types}, Current state: {metadata_state}"
                     )
                     return False
             

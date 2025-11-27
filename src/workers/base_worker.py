@@ -143,68 +143,108 @@ class BaseWorker(ABC):
             self.eof_handler.handle_eof(message, client_id, message_uuid)
 
     def start_consuming(self):
-        """Start consuming messages from the input queue."""
-        try:
-            def on_message(message):
-                """Callback for processing received messages.
+        """Start consuming messages from the input queue with automatic reconnection."""
+        import time
+        
+        def on_message(message):
+            """Callback for processing received messages.
+            
+            Args:
+                message: Received message
+            """
+            try:
+                if self.shutdown_requested:
+                    logger.info("Shutdown requested, rejecting message to requeue")
+                    raise InterruptedError("Shutdown requested, message will be requeued")
+
+                self._current_message_metadata = message
+
+                client_id, actual_data, message_uuid = extract_data_and_client_id(message)
                 
-                Args:
-                    message: Received message
-                """
+                if is_eof_message(message):
+                    logger.info(
+                        f"\033[36m[BASE-WORKER] EOF message detected for client {client_id}, "
+                        f"calling handle_eof (worker type: {self.__class__.__name__})\033[0m"
+                    )
+                    return self.handle_eof(message, client_id, message_uuid)
+
+                # Validate actual_data before processing
+                if not isinstance(actual_data, (dict, list)):
+                    logger.error(
+                        f"Invalid message data type for client {client_id}: "
+                        f"expected dict or list, got {type(actual_data).__name__} "
+                        f"with value: {actual_data}"
+                    )
+                    #return
+
+                self._increment_inflight()
                 try:
-                    if self.shutdown_requested:
-                        logger.info("Shutdown requested, rejecting message to requeue")
-                        raise InterruptedError("Shutdown requested, message will be requeued")
-
-                    self._current_message_metadata = message
-
-                    client_id, actual_data, message_uuid = extract_data_and_client_id(message)
-                    
-                    if is_eof_message(message):
-                        logger.info(
-                            f"\033[36m[BASE-WORKER] EOF message detected for client {client_id}, "
-                            f"calling handle_eof (worker type: {self.__class__.__name__})\033[0m"
-                        )
-                        return self.handle_eof(message, client_id, message_uuid)
-
-                    # Validate actual_data before processing
-                    if not isinstance(actual_data, (dict, list)):
-                        logger.error(
-                            f"Invalid message data type for client {client_id}: "
-                            f"expected dict or list, got {type(actual_data).__name__} "
-                            f"with value: {actual_data}"
-                        )
-                        #return
-
-                    self._increment_inflight()
-                    try:
-                        #logger.debug(f"Processing message for client {client_id}, data: {actual_data}")
-                        if isinstance(actual_data, list):
-                            #logger.info(f"[BASE-WORKER] [BATCH-START] Processing batch of {len(actual_data)} messages for client {client_id}, message id: {message.get('message_uuid')}")
-                            self.process_batch(actual_data, client_id)
-                            #logger.info(f"[BASE-WORKER] [BATCH-END] Batch processing completed for client {client_id}, message id: {message.get('message_uuid')}. About to return from on_message callback.")
-                        else:
-                            logger.info(f"Processing single message for client {client_id}, message id: {message.get('message_uuid')}")
+                    #logger.debug(f"Processing message for client {client_id}, data: {actual_data}")
+                    if isinstance(actual_data, list):
+                        #logger.info(f"[BASE-WORKER] [BATCH-START] Processing batch of {len(actual_data)} messages for client {client_id}, message id: {message.get('message_uuid')}")
+                        self.process_batch(actual_data, client_id)
+                        #logger.info(f"[BASE-WORKER] [BATCH-END] Batch processing completed for client {client_id}, message id: {message.get('message_uuid')}. About to return from on_message callback.")
+                    else:
+                        logger.info(f"Processing single message for client {client_id}, message id: {message.get('message_uuid')}")
        
-                    finally:
-                        self._decrement_inflight()
-
-                except Exception as e:
-                    logger.error(f"Error processing message: {e}")
-                    # Re-raise the exception so the middleware can NACK
-                    raise
                 finally:
-                    self._current_message_metadata = None
+                    self._decrement_inflight()
 
-            #self.eof_handler.start_consuming(on_message)
-            self.middleware_config.input_middleware.start_consuming(on_message)
+            except Exception as e:
+                logger.error(f"Error processing message: {e}")
+                # Re-raise the exception so the middleware can NACK
+                raise
+            finally:
+                self._current_message_metadata = None
 
-        except KeyboardInterrupt:
-            logger.info("Worker interrupted by user")
-        except Exception as e:
-            logger.error(f"Error starting consumption: {e}")
-        finally:
-            self.cleanup()
+        # Main consumption loop with automatic reconnection
+        retry_count = 0
+        max_retry_delay = 60  # Maximum delay between retries (60 seconds)
+        base_retry_delay = 2  # Base delay in seconds
+        
+        while not self.shutdown_requested:
+            try:
+                #self.eof_handler.start_consuming(on_message)
+                if retry_count > 0:
+                    logger.info(f"[BASE-WORKER] Starting message consumption (reconnection attempt {retry_count})")
+                else:
+                    logger.info("[BASE-WORKER] Starting message consumption")
+                self.middleware_config.input_middleware.start_consuming(on_message)
+                
+                # If we get here, consumption stopped without error
+                # This could be due to a graceful shutdown or connection loss
+                if self.shutdown_requested:
+                    logger.info("Consumption stopped due to shutdown request")
+                    break
+                
+                # Consumption stopped unexpectedly, log and retry
+                logger.warning("Consumption stopped unexpectedly, will attempt to reconnect...")
+                retry_count += 1
+                wait_time = min(max_retry_delay, base_retry_delay * (2 ** min(retry_count - 1, 5)))
+                logger.info(f"Waiting {wait_time} seconds before reconnecting...")
+                time.sleep(wait_time)
+                
+            except KeyboardInterrupt:
+                logger.info("Worker interrupted by user")
+                break
+            except Exception as e:
+                if self.shutdown_requested:
+                    logger.info("Shutdown requested during error handling")
+                    break
+                logger.error(f"Error in consumption loop: {e}", exc_info=True)
+                retry_count += 1
+                wait_time = min(max_retry_delay, base_retry_delay * (2 ** min(retry_count - 1, 5)))
+                logger.info(f"Error occurred, waiting {wait_time} seconds before retrying...")
+                time.sleep(wait_time)
+            else:
+                # Reset retry count on successful connection
+                if retry_count > 0:
+                    logger.info("Successfully reconnected, resetting retry count")
+                    retry_count = 0
+        
+        # Cleanup after loop exits
+        logger.info("Exiting consumption loop, cleaning up...")
+        self.cleanup()
     
     def cleanup(self):
         """Clean up resources."""
