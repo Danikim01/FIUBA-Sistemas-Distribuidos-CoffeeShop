@@ -10,6 +10,7 @@ from workers.metadata_store.stores import StoresMetadataStore
 from workers.utils.processed_message_store import ProcessedMessageStore
 from workers.utils.eof_counter_store import EOFCounterStore
 from workers.utils.aggregator_state_store import AggregatorStateStore
+from workers.utils.metadata_eof_state_store import MetadataEOFStateStore
 from worker_utils import normalize_tpv_entry, safe_int_conversion, tpv_sort_key, run_main # pyright: ignore[reportMissingImports]
 
 logging.basicConfig(level=logging.INFO)
@@ -22,14 +23,18 @@ class TPVAggregator(ProcessWorker):
         super().__init__()
         self.chunk_payload = False
         
-        self.stores_source = StoresMetadataStore(self.middleware_config)
+        # Metadata EOF tracking: Track EOFs for stores
+        self.metadata_eof_state = MetadataEOFStateStore(required_metadata_types={'stores'})
+        
+        # Create metadata store with EOF state tracking
+        self.stores_source = StoresMetadataStore(self.middleware_config, eof_state_store=self.metadata_eof_state)
         self.stores_source.start_consuming()
         
         # Number of sharded workers we expect EOFs from (must be set before loading state)
         self.expected_eof_count = int(os.getenv('REPLICA_COUNT', '2'))
         
         # Fault tolerance: Track processed message UUIDs
-        self.processed_messages = ProcessedMessageStore(worker_label="tpv_aggregator")
+        # self.processed_messages = ProcessedMessageStore(worker_label="tpv_aggregator")
         
         # Fault tolerance: Track EOF counters with deduplication
         self.eof_counter_store = EOFCounterStore(worker_label="tpv_aggregator")
@@ -87,8 +92,10 @@ class TPVAggregator(ProcessWorker):
             pass
         #self.stores_source.reset_state(client_id)
         # Clear processed messages and aggregation state
-        self.processed_messages.clear_client(client_id)
+        # self.processed_messages.clear_client(client_id)
         self.state_store.clear_client(client_id)
+        # Clear metadata EOF state for this client
+        self.metadata_eof_state.clear_client(client_id)
 
     def process_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
         """Accumulate data from a single transaction payload."""
@@ -100,16 +107,27 @@ class TPVAggregator(ProcessWorker):
         client_payloads[year_half][store_id] += tpv
     
     def process_batch(self, batch: list[Dict[str, Any]], client_id: ClientId):
-        """Process a batch with deduplication."""
-        message_uuid = self._get_current_message_uuid()
-        
-        # Check for duplicate message
-        if message_uuid and self.processed_messages.has_processed(client_id, message_uuid):
+        """Process a batch with deduplication and metadata readiness check."""
+        # Check if all metadata EOFs have been received for this client
+        if not self.metadata_eof_state.are_all_metadata_done(client_id):
+            # Not all metadata EOFs received yet, reject and requeue the message
             logger.info(
-                f"[TPV-AGGREGATOR] [DUPLICATE] Skipping duplicate batch {message_uuid} "
-                f"for client {client_id} (already processed)"
+                    f"\033[91m[TPV-AGGREGATOR] Not all metadata EOFs received for client {client_id}, "
+                    f"requeuing transaction batch\033[0m"
             )
-            return
+            raise InterruptedError(
+                f"\033[91mMetadata not ready for client {client_id}, message will be requeued\033[0m"
+            )
+        
+        # message_uuid = self._get_current_message_uuid()
+        
+        # # Check for duplicate message
+        # if message_uuid and self.processed_messages.has_processed(client_id, message_uuid):
+        #     logger.info(
+        #         f"[TPV-AGGREGATOR] [DUPLICATE] Skipping duplicate batch {message_uuid} "
+        #         f"for client {client_id} (already processed)"
+        #     )
+        #     return
         
         # Process the batch
         with self._state_lock:
@@ -120,8 +138,8 @@ class TPVAggregator(ProcessWorker):
         self._persist_state(client_id)
         
         # Mark message as processed after successful processing
-        if message_uuid:
-            self.processed_messages.mark_processed(client_id, message_uuid)
+        # if message_uuid:
+        #     self.processed_messages.mark_processed(client_id, message_uuid)
     
     def _persist_state(self, client_id: ClientId) -> None:
         """Persist the current aggregation state for a client."""
@@ -181,23 +199,12 @@ class TPVAggregator(ProcessWorker):
         # Check for duplicate EOF first
         if message_uuid and self.eof_counter_store.has_processed(client_id, message_uuid):
             logger.info(
-                f"[TPV-AGGREGATOR] [DUPLICATE-EOF] Skipping duplicate EOF {message_uuid} "
+                f"\033[91m[TPV-AGGREGATOR] [DUPLICATE-EOF] Skipping duplicate EOF {message_uuid} "
+                f"for client {client_id} (already processed)\033[0m"
                 f"for client {client_id} (already processed)"
             )
             return
-        
-        current_eof_count = self.eof_counter_store.get_counter(client_id)
-        if current_eof_count >= self.expected_eof_count:
-            logger.info(
-                f"[TPV-AGGREGATOR] [ALREADY-COMPLETED] Ignoring EOF for client {client_id} "
-                f"(already completed with {current_eof_count} EOFs). "
-                f"UUID: {message_uuid}"
-            )
-            # Mark as processed to prevent future duplicates
-            if message_uuid:
-                self.eof_counter_store.mark_processed(client_id, message_uuid)
-            return
-        
+                
         logger.info(f"[TPV-AGGREGATOR] Received EOF for client {client_id} (UUID: {message_uuid})")
         
         # Mark EOF as processed and increment counter (persisted atomically)

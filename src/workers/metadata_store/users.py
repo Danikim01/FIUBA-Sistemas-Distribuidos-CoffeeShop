@@ -15,10 +15,10 @@ birthday_column = "birthdate"
 class UsersMetadataStore(MetadataStore):
     """Stores {user_id: birthdate} per client, backed by JSON Lines persistence on disk."""
 
-    def __init__(self, middleware_config: MiddlewareConfig):
+    def __init__(self, middleware_config: MiddlewareConfig, eof_state_store=None):
         clients_queue = os.getenv("CLIENTS_QUEUE", "users_raw").strip()
         middleware = middleware_config.create_queue(clients_queue)
-        super().__init__(clients_queue, middleware)
+        super().__init__(clients_queue, middleware, eof_state_store=eof_state_store, metadata_type='users')
 
         # Cache en memoria para acceso rápido
         self.data: dict[ClientId, Dict[UserId, Birthday]] = {}

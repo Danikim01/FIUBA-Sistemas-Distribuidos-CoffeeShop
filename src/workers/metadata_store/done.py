@@ -62,14 +62,10 @@ class Done:
                 
                 # Marcar todos los clientes como done en memoria
                 for client_id in done_clients:
+                    logger.info(f"\033[92m[DONE-LOAD] Marking client {client_id} as done for {self.store_name}\033[0m")
                     done_event = self.client_done.setdefault(client_id, threading.Event())
                     done_event.set()
-                
-                if done_clients:
-                    logger.info(
-                        f"\033[92m[DONE-LOAD] Loaded done state for {len(done_clients)} clients "
-                        f"in {self.store_name}\033[0m"
-                    )
+    
         except (csv.Error, OSError, IOError) as exc:
             logger.warning(
                 f"[DONE-LOAD] Failed to load persisted state for {self.store_name}: {exc}"

@@ -15,6 +15,7 @@ from workers.metadata_store.stores import StoresMetadataStore
 from workers.utils.processed_message_store import ProcessedMessageStore
 from workers.utils.eof_counter_store import EOFCounterStore
 from workers.utils.aggregator_state_store import AggregatorStateStore
+from workers.utils.metadata_eof_state_store import MetadataEOFStateStore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,16 +31,20 @@ class TopClientsAggregator(ProcessWorker):
         
         self.top_n = safe_int_conversion(os.getenv('TOP_USERS_COUNT'), default=3)
 
-        self.stores_source = StoresMetadataStore(self.middleware_config)
+        # Metadata EOF tracking: Track EOFs for users and stores
+        self.metadata_eof_state = MetadataEOFStateStore(required_metadata_types={'users', 'stores'})
+        
+        # Create metadata stores with EOF state tracking
+        self.stores_source = StoresMetadataStore(self.middleware_config, eof_state_store=self.metadata_eof_state)
         self.stores_source.start_consuming()
-        self.birthdays_source = UsersMetadataStore(self.middleware_config)
+        self.birthdays_source = UsersMetadataStore(self.middleware_config, eof_state_store=self.metadata_eof_state)
         self.birthdays_source.start_consuming()
         
         # Number of sharded workers we expect EOFs from (must be set before loading state)
         self.expected_eof_count = int(os.getenv('REPLICA_COUNT', '2'))
         
         # Fault tolerance: Track processed message UUIDs
-        self.processed_messages = ProcessedMessageStore(worker_label="top_clients_aggregator")
+        # self.processed_messages = ProcessedMessageStore(worker_label="top_clients_aggregator")
         
         # Fault tolerance: Track EOF counters with deduplication
         self.eof_counter_store = EOFCounterStore(worker_label="top_clients_aggregator")
@@ -83,8 +88,10 @@ class TopClientsAggregator(ProcessWorker):
             pass
         #self.stores_source.reset_state(client_id)
         #self.birthdays_source.reset_state(client_id)
-        self.processed_messages.clear_client(client_id)
+        #self.processed_messages.clear_client(client_id)
         self.state_store.clear_client(client_id)
+        # Clear metadata EOF state for this client
+        self.metadata_eof_state.clear_client(client_id)
 
     
     def process_transaction(self, client_id: str, payload: dict[str, Any]) -> None:
@@ -98,16 +105,27 @@ class TopClientsAggregator(ProcessWorker):
         self.state_store.save_state(client_id, state_data)
     
     def process_batch(self, batch: list[dict[str, Any]], client_id: ClientId):
-        """Process a batch with deduplication."""
-        message_uuid = self._get_current_message_uuid()
-        
-        # Check for duplicate message
-        if message_uuid and self.processed_messages.has_processed(client_id, message_uuid):
+        """Process a batch with deduplication and metadata readiness check."""
+        # Check if all metadata EOFs have been received for this client
+        if not self.metadata_eof_state.are_all_metadata_done(client_id):
+            # Not all metadata EOFs received yet, reject and requeue the message
             logger.info(
-                f"[TOP-CLIENTS-AGGREGATOR] [DUPLICATE] Skipping duplicate batch {message_uuid} "
-                f"for client {client_id} (already processed)"
+                f"\033[91m[TOP-CLIENTS-AGGREGATOR] Not all metadata EOFs received for client {client_id}, "
+                f"requeuing transaction batch\033[0m"
             )
-            return
+            raise InterruptedError(
+                f"\033[91m[TOP-CLIENTS-AGGREGATOR] Metadata not ready for client {client_id}, message will be requeued\033[0m"
+            )
+        
+        # message_uuid = self._get_current_message_uuid()
+        
+        # # Check for duplicate message
+        # if message_uuid and self.processed_messages.has_processed(client_id, message_uuid):
+        #     logger.info(
+        #         f"[TOP-CLIENTS-AGGREGATOR] [DUPLICATE] Skipping duplicate batch {message_uuid} "
+        #         f"for client {client_id} (already processed)"
+        #     )
+        #     return
         
         # Process the batch
         with self._state_lock:
@@ -118,8 +136,8 @@ class TopClientsAggregator(ProcessWorker):
         self._persist_state(client_id)
         
         # Mark message as processed after successful processing
-        if message_uuid:
-            self.processed_messages.mark_processed(client_id, message_uuid)
+        # if message_uuid:
+        #     self.processed_messages.mark_processed(client_id, message_uuid)
 
     def create_payload(self, client_id: ClientId) -> list[Dict[str, Any]]:
         client_payloads = self.recieved_payloads.pop(client_id, [])
@@ -214,32 +232,17 @@ class TopClientsAggregator(ProcessWorker):
         # Check for duplicate EOF first
         if message_uuid and self.eof_counter_store.has_processed(client_id, message_uuid):
             logger.info(
-                f"[TOP-CLIENTS-AGGREGATOR] [DUPLICATE-EOF] Skipping duplicate EOF {message_uuid} "
-                f"for client {client_id} (already processed)"
+                f"\033[92m[TOP-CLIENTS-AGGREGATOR] [DUPLICATE-EOF] Skipping duplicate EOF {message_uuid} "
+                f"for client {client_id} (already processed)\033[0m"
             )
             return
-        
-        # Check if client already completed (before processing this EOF)
-        current_eof_count = self.eof_counter_store.get_counter(client_id)
-        if current_eof_count >= self.expected_eof_count:
-            # Client already completed, ignore this EOF (may be a duplicate or retry)
-            logger.info(
-                f"[TOP-CLIENTS-AGGREGATOR] [ALREADY-COMPLETED] Ignoring EOF for client {client_id} "
-                f"(already completed with {current_eof_count} EOFs). "
-                f"UUID: {message_uuid}"
-            )
-            # Mark as processed to prevent future duplicates
-            if message_uuid:
-                self.eof_counter_store.mark_processed(client_id, message_uuid)
-            return
-        
-        logger.info(f"[TOP-CLIENTS-AGGREGATOR] Received EOF for client {client_id} (UUID: {message_uuid})")
+                
+        logger.info(f"\033[92m[TOP-CLIENTS-AGGREGATOR] Received EOF for client {client_id} (UUID: {message_uuid})\033[0m")
         
         # Mark EOF as processed and increment counter (persisted atomically)
         if message_uuid:
             self.eof_counter_store.mark_processed(client_id, message_uuid)
         
-
         eof_count = self.eof_counter_store.increment_counter(client_id)
         
         logger.info(

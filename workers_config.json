@@ -16,7 +16,7 @@
       "FILTER_REPLICA_COUNT": "3"
     },
     "client": {
-      "count": 6,
+      "count": 3,
       "GATEWAY_HOST": "gateway",
       "GATEWAY_PORT": "12345",
       "BATCH_MAX_SIZE_KB": "4096",

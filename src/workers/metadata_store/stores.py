@@ -12,14 +12,16 @@ StoreId = str
 StoreName = str
     
 class StoresMetadataStore(MetadataStore):
-    def __init__(self, middleware_config: MiddlewareConfig):
+    def __init__(self, middleware_config: MiddlewareConfig, eof_state_store=None):
         """Initialize a stores metadata store for the worker.
         
         Args:
+            middleware_config: Middleware configuration
+            eof_state_store: Optional MetadataEOFStateStore for tracking EOFs
         """ 
         stores_exchange = os.getenv('STORES_EXCHANGE', 'stores_raw').strip()
         middleware = middleware_config.create_exchange(stores_exchange)
-        super().__init__(stores_exchange, middleware)
+        super().__init__(stores_exchange, middleware, eof_state_store=eof_state_store, metadata_type='stores')
         
         # Cache en memoria para acceso rápido
         self.data: dict[ClientId, dict[StoreId, StoreName]] = {}

@@ -1,25 +1,33 @@
 from abc import ABC, abstractmethod
 import logging
 import threading
-from typing import Any
+from typing import Any, Optional
 from message_utils import ClientId, extract_data_and_client_id, is_eof_message
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue
-from workers.metadata_store.done import Done
 
 logger = logging.getLogger(__name__)
 
 class MetadataStore(ABC):
-    def __init__(self, name: str, middleware: RabbitMQMiddlewareQueue | RabbitMQMiddlewareExchange ):
+    def __init__(
+        self, 
+        name: str, 
+        middleware: RabbitMQMiddlewareQueue | RabbitMQMiddlewareExchange,
+        eof_state_store: Optional[Any] = None,
+        metadata_type: Optional[str] = None
+    ):
         """Initialize an metadata store for the worker.
         
         Args:
             name: Name of the metadata
-            queue: Queue name for the metadata (optional)
+            middleware: Middleware for consuming messages
+            eof_state_store: Optional MetadataEOFStateStore for tracking EOFs
+            metadata_type: Optional metadata type ('users', 'stores', 'menu_items') for EOF tracking
         """
         self.name = name
         self.middleware = middleware
         self.current_client_id = ''
-        self.clients_done = Done(name)
+        self.eof_state_store = eof_state_store
+        self.metadata_type = metadata_type
         self.consuming_thread = threading.Thread(target=self._start_consuming, daemon=True)
         
     def close(self):
@@ -34,15 +42,30 @@ class MetadataStore(ABC):
         def on_message(message):
             try:
                 client_id, data, _ = extract_data_and_client_id(message)
+                
+                # Validar que el client_id esté presente
+                if not client_id or client_id.strip() == '':
+                    logger.error(
+                        f"Received message without client_id in metadata store {self.name}. "
+                        f"Message keys: {list(message.keys()) if isinstance(message, dict) else 'N/A'}. "
+                        f"Discarding message."
+                    )
+                    return
+                
                 self.current_client_id = client_id
 
-                if self.clients_done.is_client_done(client_id):
-                    logger.info(f"Extra source {self.name} already done, ignoring message")
-                    return
+                # Verificar si ya se procesó el EOF usando eof_state_store
+                if self.eof_state_store and self.metadata_type:
+                    state = self.eof_state_store.get_metadata_state(client_id)
+                    if state.get(self.metadata_type, False):
+                        logger.info(f"Extra source {self.name} already done for client {client_id}, ignoring message")
+                        return
                 
                 if is_eof_message(message):
                     logger.info(f"EOF from client {client_id} received from extra source {self.name}")
-                    self.clients_done.set_done(client_id)
+                    # Notificar al MetadataEOFStateStore
+                    if self.eof_state_store and self.metadata_type:
+                        self.eof_state_store.mark_metadata_done(client_id, self.metadata_type)
                     return
 
                 self._handle_data(data)
@@ -103,9 +126,11 @@ class MetadataStore(ABC):
         raise NotImplementedError
     
     def reset_state(self, client_id: ClientId):
-        """Reset the internal state of the metadata store, including Done state."""
-        # Limpiar el estado Done para este cliente
-        self.clients_done.clear_client(client_id)
+        """Reset the internal state of the metadata store.
+        
+        Nota: El estado de EOF en MetadataEOFStateStore se limpia en el aggregator
+        cuando llama a reset_state().
+        """
         # Llamar al método abstracto para limpiar la metadata específica
         self._reset_metadata_state(client_id)
     
@@ -124,32 +149,12 @@ class MetadataStore(ABC):
         item_id: str,
     ) -> str:
         """
-        Obtiene un item, esperando a que termine el consumo si es necesario.
+        Obtiene un item de metadata.
         
-        Primero intenta obtener el item directamente (puede estar en cache o persistencia).
-        Si no está disponible y el consumo no ha terminado, espera con timeout.
+        Nota: Este método se llama después de que are_all_metadata_done() es True,
+        por lo que el EOF de este metadata store ya llegó y el item debería estar
+        disponible (en cache o persistencia). Si no está, es porque no existe en los datos.
         """
-        # Primero intentar obtener el item directamente (puede estar en cache o persistencia)
-        item = self._get_item(client_id, item_id)
-        
-        # Si el item no es el valor por defecto, ya lo tenemos (en cache o persistencia)
-        # No necesitamos esperar al EOF
-        default_values = ("Unknown Birthday", "Unknown Store", "Unknown Item", "Unknown")
-        if item not in default_values:
-            return item
-        
-        # Si no tenemos el item, esperar a que termine el consumo (con timeout)
-        # pero solo si el consumo no ha terminado aún
-        if not self.clients_done.is_client_done(client_id, block=False):
-            # El consumo no ha terminado, esperar con timeout
-            if not self.clients_done.is_client_done(client_id, block=True, timeout=10.0):
-                logger.warning(
-                    "\033[1;38;5;202mTimed out waiting for metadata queue %s to finish for client %s before retrieving %s. "
-                    "Item may not be available yet.\033[0m",
-                    self.name,
-                    client_id,
-                    item_id,
-                )
-        
-        # Intentar obtener el item nuevamente (puede haberse cargado mientras esperábamos)
+        # Intentar obtener el item directamente (debe estar en cache o persistencia)
+        # ya que are_all_metadata_done() garantiza que el EOF ya llegó
         return self._get_item(client_id, item_id)

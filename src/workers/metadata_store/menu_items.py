@@ -17,14 +17,16 @@ ItemName = str
 class MenuItemsMetadataStore(MetadataStore):
     """Stores {item_id: item_name} per client, backed by JSON Lines persistence on disk."""
     
-    def __init__(self, middleware_config: MiddlewareConfig):
+    def __init__(self, middleware_config: MiddlewareConfig, eof_state_store=None):
         """Initialize a menu items metadata store for the worker.
         
         Args:
+            middleware_config: Middleware configuration
+            eof_state_store: Optional MetadataEOFStateStore for tracking EOFs
         """ 
         menu_items_queue = os.getenv('MENU_ITEMS_QUEUE', 'menu_items_raw').strip()
         middleware = middleware_config.create_queue(menu_items_queue)
-        super().__init__(menu_items_queue, middleware)
+        super().__init__(menu_items_queue, middleware, eof_state_store=eof_state_store, metadata_type='menu_items')
         
         # Cache en memoria para acceso rápido
         self.data: dict[ClientId, dict[ItemId, ItemName]] = {}
