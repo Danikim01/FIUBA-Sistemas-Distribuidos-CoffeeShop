@@ -82,16 +82,29 @@ class TopClientsAggregator(ProcessWorker):
     def reset_state(self, client_id: ClientId) -> None:
         """Reset state for a client. 
         """
-        try:
-            del self.recieved_payloads[client_id]
-        except KeyError:
-            pass
-        #self.stores_source.reset_state(client_id)
-        #self.birthdays_source.reset_state(client_id)
-        #self.processed_messages.clear_client(client_id)
-        self.state_store.clear_client(client_id)
-        # Clear metadata EOF state for this client
+        self._clear_client_state(client_id)
+
+    def _clear_client_state(self, client_id: ClientId) -> None:
+        with self._state_lock:
+            self.recieved_payloads.pop(client_id, None)
+
+        self.stores_source.reset_state(client_id)
+        self.birthdays_source.reset_state(client_id)
         self.metadata_eof_state.clear_client(client_id)
+        self.state_store.clear_client(client_id)
+        self.processed_messages.clear_client(client_id)
+        self.eof_counter_store.clear_client(client_id)
+
+    def _clear_all_state(self) -> None:
+        with self._state_lock:
+            self.recieved_payloads.clear()
+
+        self.stores_source.reset_all()
+        self.birthdays_source.reset_all()
+        self.metadata_eof_state.clear_all()
+        self.state_store.clear_all()
+        self.processed_messages.clear_all()
+        self.eof_counter_store.clear_all()
 
     
     def process_transaction(self, client_id: str, payload: dict[str, Any]) -> None:
@@ -268,6 +281,8 @@ class TopClientsAggregator(ProcessWorker):
 
                 for chunk in payload_batches:
                     self.send_payload(chunk, client_id)
+
+                self._clear_client_state(client_id)
                 
             else:
                 # Not all EOFs received yet, just discard this EOF
@@ -292,6 +307,14 @@ class TopClientsAggregator(ProcessWorker):
             self.birthdays_source.close()
         except Exception:  # noqa: BLE001
             logger.warning("Failed to close extra sources", exc_info=True)
+
+    def handle_client_reset(self, client_id: ClientId) -> None:
+        """Handle reset instructions for a specific client."""
+        self._clear_client_state(client_id)
+
+    def handle_reset_all_clients(self) -> None:
+        """Handle reset instructions for all clients."""
+        self._clear_all_state()
 
 
 if __name__ == '__main__':

@@ -342,6 +342,30 @@ class ShardedTPVWorker(ProcessWorker):
             return None
         return str(message_uuid)
 
+    def _clear_client_state(self, client_id: ClientId) -> None:
+        """Remove in-memory and persisted data for the client."""
+        with self._state_lock:
+            self.partial_tpv.pop(client_id, None)
+            self._clients_with_eof.discard(client_id)
+
+        self.state_manager.clear_last_processed_message(client_id)
+        self.state_manager.drop_empty_client_state(client_id)
+        self.state_manager.clear_client_files(client_id)
+        logger.info("[CONTROL] TPV shard %s cleared state for client %s", self.worker_id, client_id)
+
+    def handle_client_reset(self, client_id: ClientId) -> None:
+        self._clear_client_state(client_id)
+
+    def handle_reset_all_clients(self) -> None:
+        with self._state_lock:
+            self.partial_tpv.clear()
+            self._clients_with_eof.clear()
+
+        self.state_manager.state_data = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+        self.state_manager.clear_last_processed_messages()
+        self.state_manager.clear_all_files()
+        logger.info("[CONTROL] TPV shard %s cleared all client state", self.worker_id)
+
 
 if __name__ == '__main__':
     run_main(ShardedTPVWorker)

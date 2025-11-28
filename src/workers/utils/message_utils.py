@@ -7,6 +7,9 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 ClientId = str
+RESET_CLIENT_TYPE = "CLIENT_RESET"
+RESET_ALL_TYPE = "RESET_ALL"
+
 
 def is_eof_message(message: Any) -> bool:
     """Check if a message is an EOF (End Of File) control message.
@@ -128,15 +131,22 @@ def extract_batch_num_from_sequence_id(sequence_id: str) -> Optional[int]:
     Returns:
         Batch number as integer if parsing succeeds, None otherwise
     """
-    if not sequence_id:
-        return None
-    
     try:
-        # Split by last hyphen to get batch number
-        parts = sequence_id.rsplit('-', 1)
-        if len(parts) == 2:
-            return int(parts[1])
-        return None
-    except (ValueError, AttributeError):
+        _, num = sequence_id.rsplit('-', 1)
+        return int(num)
+    except (ValueError, IndexError):
         logger.warning(f"Failed to parse batch number from sequence_id: {sequence_id}")
         return None
+
+def _is_type(message: Any, expected_type: str) -> bool:
+    return isinstance(message, dict) and str(message.get('type', '')).upper() == expected_type.upper()
+
+
+def is_client_reset_message(message: Any) -> bool:
+    """Check if the message instructs a client-specific reset."""
+    return _is_type(message, RESET_CLIENT_TYPE)
+
+
+def is_reset_all_clients_message(message: Any) -> bool:
+    """Check if the message instructs a global reset."""
+    return _is_type(message, RESET_ALL_TYPE)

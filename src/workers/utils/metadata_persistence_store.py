@@ -274,9 +274,19 @@ class MetadataPersistenceStore:
             logger.info(
                 f"\033[32m[CLEAR] Cleared {self.store_type} metadata for client {client_id}\033[0m"
             )
+
+    def clear_all(self) -> None:
+        """Clears the data for all clients."""
+        with self._lock:
+            self._cache.clear()
+            for path in self._store_dir.glob("*.csv"):
+                with contextlib.suppress(Exception):
+                    path.unlink()
+            logger.info(
+                f"\033[32m[CLEAR] Cleared {self.store_type} metadata for all clients\033[0m"
+            )
     
     def has_item(self, client_id: ClientId, item_id: str) -> bool:
         """Checks if an item exists for a client."""
         data = self._load_client(client_id)
         return item_id in data
-

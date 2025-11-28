@@ -130,17 +130,7 @@ class TopItemsAggregator(ProcessWorker):
         NOTE: This is called after sending final results. We keep EOF counter
         and processed UUIDs to handle duplicate EOFs that may arrive later.
         """
-        for store in (self._quantity_totals, self._profit_totals):
-            try:
-                del store[client_id]
-            except KeyError:
-                continue
-        # Clear metadata EOF state for this client
-        self.metadata_eof_state.clear_client(client_id)
-        #self.menu_items_source.reset_state(client_id)
-        # Clear processed messages and aggregation state
-        #self.processed_messages.clear_client(client_id)
-        self.state_store.clear_client(client_id)
+        self._clear_client_state(client_id)
 
     def _merge_quantity_totals_map(self, client_id: ClientId, totals: Any) -> None:
         if not isinstance(totals, dict):
@@ -232,6 +222,30 @@ class TopItemsAggregator(ProcessWorker):
         }
         logger.info(f"\033[92m[ITEMS-AGGREGATOR] Persisting state for client {client_id}\033[0m")
         self.state_store.save_state(client_id, state_data)
+
+    def _clear_client_state(self, client_id: ClientId) -> None:
+        """Clear memory and persistence for the given client."""
+        with self._state_lock:
+            self._quantity_totals.pop(client_id, None)
+            self._profit_totals.pop(client_id, None)
+
+        self.menu_items_source.reset_state(client_id)
+        self.metadata_eof_state.clear_client(client_id)
+        self.state_store.clear_client(client_id)
+        self.processed_messages.clear_client(client_id)
+        self.eof_counter_store.clear_client(client_id)
+
+    def _clear_all_state(self) -> None:
+        """Clear all memory and persistence for every client."""
+        with self._state_lock:
+            self._quantity_totals.clear()
+            self._profit_totals.clear()
+
+        self.menu_items_source.reset_all()
+        self.metadata_eof_state.clear_all()
+        self.state_store.clear_all()
+        self.processed_messages.clear_all()
+        self.eof_counter_store.clear_all()
 
     def get_item_name(self, clientId: ClientId, item_id: ItemId) -> str:
         return self.menu_items_source.get_item_when_done(clientId, str(item_id))
@@ -345,6 +359,8 @@ class TopItemsAggregator(ProcessWorker):
 
                 for chunk in payload_batches:
                     self.send_payload(chunk, client_id)
+                
+                self._clear_client_state(client_id)
                                 
             else:
                 # Not all EOFs received yet, just discard this EOF
@@ -367,6 +383,14 @@ class TopItemsAggregator(ProcessWorker):
             self.menu_items_source.close()
         finally:
             super().cleanup()
+
+    def handle_client_reset(self, client_id: ClientId) -> None:
+        """Clear client-specific state when requested."""
+        self._clear_client_state(client_id)
+
+    def handle_reset_all_clients(self) -> None:
+        """Clear all cached state when global reset is requested."""
+        self._clear_all_state()
 
 
 if __name__ == "__main__":

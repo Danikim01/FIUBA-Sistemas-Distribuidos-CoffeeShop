@@ -408,6 +408,30 @@ class StateManager(Generic[T]):
         """
         # Default implementation - subclasses should override this
         pass
+
+    def clear_client_files(self, client_id: ClientId) -> None:
+        """Remove persisted files for a specific client."""
+        client_path = self._get_client_state_path(client_id)
+        backup_path = client_path.with_suffix(".backup.json")
+        temp_path = client_path.with_suffix(".temp.json")
+        for path in (client_path, backup_path, temp_path):
+            with contextlib.suppress(Exception):
+                path.unlink()
+
+    def clear_all_files(self) -> None:
+        """Remove all persisted client files, backups, and metadata temp files."""
+        patterns = ("client_*.json", "client_*.backup.json", "client_*.temp.json")
+        for pattern in patterns:
+            for path in self._state_dir.glob(pattern):
+                with contextlib.suppress(Exception):
+                    path.unlink()
+        for meta_path in (self._state_dir / "metadata.json", self._state_dir / "metadata.backup.json", self._state_dir / "metadata.temp.json"):
+            with contextlib.suppress(Exception):
+                meta_path.unlink()
+
+    def clear_last_processed_messages(self) -> None:
+        """Clear cached message UUIDs for all clients."""
+        self._last_processed_message.clear()
     
     def get_state_data(self) -> T | None:
         """Get the current state data."""
@@ -422,7 +446,5 @@ class StateManager(Generic[T]):
         """Compute SHA256 checksum for payload validation."""
         serialized = json.dumps(payload, sort_keys=True, separators=(',', ':')).encode('utf-8')
         return hashlib.sha256(serialized).hexdigest()
-
-
 
 

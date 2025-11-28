@@ -346,8 +346,17 @@ class MetadataEOFStateStore:
             logger.info(
                 f"\033[32m[METADATA-EOF-STATE] Cleared state for client {client_id}\033[0m"
             )
+
+    def clear_all(self) -> None:
+        """Clears state for all clients."""
+        with self._lock:
+            self._cache.clear()
+            for pattern in ("*.json", "*.backup.json", "*.temp.json"):
+                for path in self._store_dir.glob(pattern):
+                    with contextlib.suppress(Exception):
+                        path.unlink()
+        logger.info("\033[32m[METADATA-EOF-STATE] Cleared metadata EOF state for all clients\033[0m")
     
     def get_metadata_state(self, client_id: ClientId) -> Dict[str, bool]:
         """Gets the metadata state for a client (copy)."""
         return self._load_client(client_id)
-

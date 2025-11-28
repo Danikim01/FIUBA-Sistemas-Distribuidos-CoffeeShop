@@ -46,7 +46,13 @@ class ClientHandler:
                         new_client_id = self.session_manager.create_session(client_socket, address)
                         
                         # Remove the old session
+                        old_client_id = client_id
                         self.session_manager.remove_session(client_id)
+                        try:
+                            self.queue_manager.propagate_client_reset(old_client_id)
+                        except Exception as exc:  # noqa: BLE001
+                            logger.error("Failed to propagate client reset for %s after session reset: %s", old_client_id, exc)
+                        self._seen_transaction_ids.pop(old_client_id, None)
                         
                         # Update to use the new client ID
                         client_id = new_client_id
@@ -100,10 +106,17 @@ class ClientHandler:
                     
         except Exception as e:
             logger.error(f"Error in client handler for {client_id} at {address}: {e}")
-        # finally:
-            # Clean up client session
-            # self.session_manager.cleanup_session(client_id)
-            # logger.info(f"Connection with client {client_id} from {address} closed")
+        finally:
+            # Propagate reset for this client so workers can drop partial state
+            try:
+                self.queue_manager.propagate_client_reset(client_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Failed to propagate client reset for %s: %s", client_id, exc)
+
+            # Clean up session and deduplication tracking
+            self.session_manager.remove_session(client_id)
+            self._seen_transaction_ids.pop(client_id, None)
+            logger.info(f"Connection with client {client_id} from {address} closed")
     
     def _send_response_safe(self, client_socket: socket.socket, success: bool) -> None:
         """Safely send response to client."""

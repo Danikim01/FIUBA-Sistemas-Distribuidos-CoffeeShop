@@ -151,3 +151,12 @@ class ProcessedMessageStore:
             with contextlib.suppress(Exception):
                 path.unlink()
             logger.info(f"\033[32m[CLEAR] Cleared processed messages for client {client_id}\033[0m")
+    
+    def clear_all(self) -> None:
+        """Clear processed messages for all clients."""
+        with self._lock:
+            self._cache.clear()
+            for path in self._store_dir.glob("*.txt"):
+                with contextlib.suppress(Exception):
+                    path.unlink()
+            logger.info("\033[32m[CLEAR] Cleared processed messages for all clients\033[0m")

@@ -30,6 +30,10 @@ class CoffeeShopGateway:
         
         # Initialize components
         self.queue_manager = QueueManager(self.config)
+        try:
+            self.queue_manager.propagate_global_reset()
+        except Exception as exc:
+            logger.error("Failed to broadcast global reset on startup: %s", exc)
         self.client_handler = ClientHandler(self.queue_manager)
         
         # Server state

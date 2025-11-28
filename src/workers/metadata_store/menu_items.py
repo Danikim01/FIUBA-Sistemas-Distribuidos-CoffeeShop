@@ -42,6 +42,11 @@ class MenuItemsMetadataStore(MetadataStore):
         self.data.pop(client_id, None)
         self._persistence.clear_client(client_id)
 
+    def reset_all(self):
+        """Reset the metadata state for all clients."""
+        self.data.clear()
+        self._persistence.clear_all()
+
     def save_data(self, data: dict):
         """Save the message to disk or process it as needed."""
         item_id = str(data.get(id_column, '')).strip()

@@ -14,6 +14,8 @@ from message_utils import ( # pyright: ignore[reportMissingImports]
     extract_sequence_id,
     extract_message_uuid,
     is_eof_message,
+    is_client_reset_message,
+    is_reset_all_clients_message,
     create_message_with_metadata,
 )
 from typing import Optional
@@ -161,6 +163,14 @@ class BaseWorker(ABC):
 
                 client_id, actual_data, message_uuid = extract_data_and_client_id(message)
                 
+                if is_reset_all_clients_message(message):
+                    logger.info("[CONTROL] Global reset control message received by %s", self.__class__.__name__)
+                    return self.handle_reset_all_clients()
+
+                if is_client_reset_message(message):
+                    logger.info("[CONTROL] Client reset message received for %s on %s", client_id, self.__class__.__name__)
+                    return self.handle_client_reset(client_id)
+
                 if is_eof_message(message):
                     logger.info(
                         f"\033[36m[BASE-WORKER] EOF message detected for client {client_id}, "
@@ -301,3 +311,14 @@ class BaseWorker(ABC):
             yield
         finally:
             self._end_pause()
+
+    # ------------------------------------------------------------------
+    # Control message handlers
+    # ------------------------------------------------------------------
+    def handle_client_reset(self, client_id: ClientId) -> None:
+        """Handle a control message that requests per-client cleanup."""
+        logger.info("[CONTROL] %s received client reset for %s (default handler)", self.__class__.__name__, client_id)
+
+    def handle_reset_all_clients(self) -> None:
+        """Handle a control message that requests global cleanup."""
+        logger.info("[CONTROL] %s received global reset (default handler)", self.__class__.__name__)

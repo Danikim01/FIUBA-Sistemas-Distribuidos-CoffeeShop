@@ -80,22 +80,30 @@ class TPVAggregator(ProcessWorker):
         """Load persisted EOF counters for all clients on startup."""
         logger.info("[TPV-AGGREGATOR] EOF counters will be loaded from persistence on first access")
 
-    def reset_state(self, client_id: ClientId) -> None:
-        """Reset state for a client. 
-        
-        NOTE: This is called after sending final results. We keep EOF counter
-        and processed UUIDs to handle duplicate EOFs that may arrive later.
-        """
-        try:
-            del self.recieved_payloads[client_id]
-        except KeyError:
-            pass
-        #self.stores_source.reset_state(client_id)
-        # Clear processed messages and aggregation state
-        # self.processed_messages.clear_client(client_id)
+    def _clear_client_state(self, client_id: ClientId) -> None:
+        """Clear all state and persistence for a client."""
+        with self._state_lock:
+            self.recieved_payloads.pop(client_id, None)
+
+        self.stores_source.reset_state(client_id)
         self.state_store.clear_client(client_id)
-        # Clear metadata EOF state for this client
         self.metadata_eof_state.clear_client(client_id)
+        self.processed_messages.clear_client(client_id)
+        self.eof_counter_store.clear_client(client_id)
+
+    def _clear_all_state(self) -> None:
+        """Clear all state and persistence for every client."""
+        with self._state_lock:
+            self.recieved_payloads.clear()
+
+        self.stores_source.reset_all()
+        self.state_store.clear_all()
+        self.metadata_eof_state.clear_all()
+        self.processed_messages.clear_all()
+        self.eof_counter_store.clear_all()
+
+    def reset_state(self, client_id: ClientId) -> None:
+        self._clear_client_state(client_id)
 
     def process_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
         """Accumulate data from a single transaction payload."""
@@ -241,6 +249,8 @@ class TPVAggregator(ProcessWorker):
                 for chunk in payload_batches:
                     self.send_payload(chunk, client_id)
                 
+                self._clear_client_state(client_id)
+                
             else:
                 # Not all EOFs received yet, just discard this EOF
                 # (we don't need requeue since each sharded worker sends its own EOF)
@@ -262,6 +272,14 @@ class TPVAggregator(ProcessWorker):
             self.stores_source.close()
         finally:
             super().cleanup()
+
+    def handle_client_reset(self, client_id: ClientId) -> None:
+        """Delete the client's state when a reset control message arrives."""
+        self._clear_client_state(client_id)
+
+    def handle_reset_all_clients(self) -> None:
+        """Delete all clients' state when a global reset control message arrives."""
+        self._clear_all_state()
 
 
 if __name__ == "__main__":

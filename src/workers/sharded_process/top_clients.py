@@ -289,6 +289,29 @@ class ShardedClientsWorker(ProcessWorker):
             return None
         return str(message_uuid)
 
+    def _clear_client_state(self, client_id: ClientId) -> None:
+        with self._state_lock:
+            self.clients_data.pop(client_id, None)
+            self._clients_with_eof.discard(client_id)
+
+        self.state_manager.clear_last_processed_message(client_id)
+        self.state_manager.drop_empty_client_state(client_id)
+        self.state_manager.clear_client_files(client_id)
+        logger.info("[CONTROL] Sharded clients worker %s cleared state for client %s", self.worker_id, client_id)
+
+    def handle_client_reset(self, client_id: ClientId) -> None:
+        self._clear_client_state(client_id)
+
+    def handle_reset_all_clients(self) -> None:
+        with self._state_lock:
+            self.clients_data.clear()
+            self._clients_with_eof.clear()
+
+        self.state_manager.clear_last_processed_messages()
+        self.state_manager.clear_all_files()
+        self.state_manager.state_data = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+        logger.info("[CONTROL] Sharded clients worker %s cleared all client state", self.worker_id)
+
 
 if __name__ == '__main__':
     run_main(ShardedClientsWorker)

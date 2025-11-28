@@ -28,6 +28,7 @@ from common.models import (
 )
 
 logger = logging.getLogger(__name__)
+CONTROL_CLIENT_ID = "gateway-control"
 
 class _ResultsRouter:
     """Single-consumer router that delivers results to the correct client."""
@@ -149,6 +150,7 @@ class QueueManager:
         # Transactions exchange publisher per thread (with sharding support)
         replica_count = self.config.filter_replica_count
         transaction_route_keys = [f"shard_{i}" for i in range(replica_count)]
+        self._transaction_route_keys = transaction_route_keys.copy()
         self.transactions_exchange = ThreadAwareExchangePublisher(
             lambda: RabbitMQMiddlewareExchange(
                 exchange_name=self.config.transactions_exchange_name,
@@ -179,6 +181,7 @@ class QueueManager:
         
         # Transaction items exchange publisher per thread (with sharding support)
         transaction_items_route_keys = [f"shard_{i}" for i in range(replica_count)]
+        self._transaction_items_route_keys = transaction_items_route_keys.copy()
         self.transaction_items_exchange = ThreadAwareExchangePublisher(
             lambda: RabbitMQMiddlewareExchange(
                 exchange_name=self.config.transaction_items_exchange_name,
@@ -532,6 +535,51 @@ class QueueManager:
         except Exception as exc:
             logger.error(f"Failed to propagate EOF to menu items queue for client {client_id}: {exc}")
             raise
+
+    def propagate_client_reset(self, client_id: str) -> None:
+        """Broadcast a control message instructing workers to drop state for a client."""
+        control_message = create_message_with_metadata(
+            client_id=client_id,
+            data=None,
+            message_type="CLIENT_RESET",
+            reason="gateway_client_disconnect",
+        )
+        logger.info("Broadcasting client reset control message for %s", client_id)
+        self._broadcast_control_message(control_message)
+
+    def propagate_global_reset(self) -> None:
+        """Broadcast a control message instructing workers to drop all state."""
+        control_message = create_message_with_metadata(
+            client_id=CONTROL_CLIENT_ID,
+            data=None,
+            message_type="RESET_ALL",
+            reason="gateway_startup",
+        )
+        logger.info("Broadcasting global reset control message")
+        self._broadcast_control_message(control_message)
+
+    def _broadcast_control_message(self, message: dict[str, Any]) -> None:
+        """Send a control message to every pipeline (transactions, items, users, menu, stores)."""
+        send_errors: list[str] = []
+
+        def _safe_send(publisher, **kwargs):
+            try:
+                publisher.send(message, **kwargs)
+            except Exception as exc:
+                send_errors.append(f"{type(publisher).__name__}: {exc}")
+
+        for routing_key in self._transaction_route_keys:
+            _safe_send(self.transactions_exchange, routing_key=routing_key)
+
+        for routing_key in self._transaction_items_route_keys:
+            _safe_send(self.transaction_items_exchange, routing_key=routing_key)
+
+        _safe_send(self.stores_exchange)
+        _safe_send(self.users_queue)
+        _safe_send(self.menu_items_queue)
+
+        if send_errors:
+            logger.warning("Some control broadcasts failed: %s", "; ".join(send_errors))
     
     def close(self) -> None:
         """Close all RabbitMQ publishers created by the manager."""

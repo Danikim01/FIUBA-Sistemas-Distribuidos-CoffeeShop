@@ -298,6 +298,16 @@ class AggregatorStateStore:
             logger.info(
                 f"\033[32m[AGGREGATOR-STATE-STORE] Cleared state for client {client_id}\033[0m"
             )
+
+    def clear_all(self) -> None:
+        """Clears the state of all clients."""
+        with self._lock:
+            self._cache.clear()
+            for pattern in ("*.json", "*.backup.json", "*.temp.json"):
+                for path in self._store_dir.glob(pattern):
+                    with contextlib.suppress(Exception):
+                        path.unlink()
+        logger.info("\033[32m[AGGREGATOR-STATE-STORE] Cleared state for all clients\033[0m")
     
     def has_state(self, client_id: ClientId) -> bool:
         """Checks if a client has persisted state."""
@@ -306,4 +316,3 @@ class AggregatorStateStore:
                 return bool(self._cache[client_id])
             path = self._client_path(client_id)
             return path.exists()
-

@@ -357,3 +357,13 @@ class EOFCounterStore:
                 backup_path.unlink()
             logger.info(f"\033[32m[EOF-COUNTER-STORE] Cleared EOF counter and processed UUIDs for client {client_id}\033[0m")
 
+    def clear_all(self) -> None:
+        """Clear EOF counters and processed UUIDs for all clients."""
+        with self._lock:
+            self._cache.clear()
+            self._processed_eofs_cache.clear()
+            for pattern in ("*.json", "*.backup.json", "*.temp.json"):
+                for path in self._store_dir.glob(pattern):
+                    with contextlib.suppress(Exception):
+                        path.unlink()
+            logger.info("\033[32m[EOF-COUNTER-STORE] Cleared EOF counters for all clients\033[0m")
