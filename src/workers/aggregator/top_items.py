@@ -60,7 +60,7 @@ class TopItemsAggregator(ProcessWorker):
         self.menu_items_source.start_consuming()
 
         # Fault tolerance: Track processed message UUIDs
-        #self.processed_messages = ProcessedMessageStore(worker_label="top_items_aggregator")
+        self.processed_messages = ProcessedMessageStore(worker_label="top_items_aggregator")
         
         # Fault tolerance: Track EOF counters with deduplication
         self.eof_counter_store = EOFCounterStore(worker_label="top_items_aggregator")
@@ -193,15 +193,15 @@ class TopItemsAggregator(ProcessWorker):
                 f"\033[91m[TOP-ITEMS-AGGREGATOR] Metadata not ready for client {client_id}, message will be requeued\033[0m"
             )
         
-        # message_uuid = self._get_current_message_uuid()
+        message_uuid = self._get_current_message_uuid()
         
-        # # Check for duplicate message
-        # if message_uuid and self.processed_messages.has_processed(client_id, message_uuid):
-        #     logger.info(
-        #         f"[ITEMS-AGGREGATOR] [DUPLICATE] Skipping duplicate batch {message_uuid} "
-        #         f"for client {client_id} (already processed)"
-        #     )
-        #     return
+        # Check for duplicate message
+        if message_uuid and self.processed_messages.has_processed(client_id, message_uuid):
+            logger.info(
+                f"[ITEMS-AGGREGATOR] [DUPLICATE] Skipping duplicate batch {message_uuid} "
+                f"for client {client_id} (already processed)"
+            )
+            return
         
         # Process the batch
         with self._state_lock:
@@ -212,8 +212,8 @@ class TopItemsAggregator(ProcessWorker):
         self._persist_state(client_id)
         
         # Mark message as processed after successful processing
-        # if message_uuid:
-        #     self.processed_messages.mark_processed(client_id, message_uuid)
+        if message_uuid:
+            self.processed_messages.mark_processed(client_id, message_uuid)
     
     def _persist_state(self, client_id: ClientId) -> None:
         """Persist the current aggregation state for a client."""
