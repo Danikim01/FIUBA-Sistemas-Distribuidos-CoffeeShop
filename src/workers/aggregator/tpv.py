@@ -275,10 +275,12 @@ class TPVAggregator(ProcessWorker):
 
     def handle_client_reset(self, client_id: ClientId) -> None:
         """Delete the client's state when a reset control message arrives."""
+        logger.info("[CONTROL] TPVAggregator received client reset for %s", client_id)
         self._clear_client_state(client_id)
 
     def handle_reset_all_clients(self) -> None:
         """Delete all clients' state when a global reset control message arrives."""
+        logger.info("[CONTROL] TPVAggregator received global reset request")
         self._clear_all_state()
 
 

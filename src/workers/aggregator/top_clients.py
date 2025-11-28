@@ -310,10 +310,12 @@ class TopClientsAggregator(ProcessWorker):
 
     def handle_client_reset(self, client_id: ClientId) -> None:
         """Handle reset instructions for a specific client."""
+        logger.info("[CONTROL] TopClientsAggregator received client reset for %s", client_id)
         self._clear_client_state(client_id)
 
     def handle_reset_all_clients(self) -> None:
         """Handle reset instructions for all clients."""
+        logger.info("[CONTROL] TopClientsAggregator received global reset request")
         self._clear_all_state()
 
 

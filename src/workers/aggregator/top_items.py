@@ -386,10 +386,12 @@ class TopItemsAggregator(ProcessWorker):
 
     def handle_client_reset(self, client_id: ClientId) -> None:
         """Clear client-specific state when requested."""
+        logger.info("[CONTROL] TopItemsAggregator received client reset for %s", client_id)
         self._clear_client_state(client_id)
 
     def handle_reset_all_clients(self) -> None:
         """Clear all cached state when global reset is requested."""
+        logger.info("[CONTROL] TopItemsAggregator received global reset request")
         self._clear_all_state()
 
 
