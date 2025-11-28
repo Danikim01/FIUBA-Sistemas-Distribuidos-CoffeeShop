@@ -251,33 +251,8 @@ class ShardedClientsWorker(ProcessWorker):
             except Exception:
                 raise
 
-            with self._state_lock:
-                previous_state = self.state_manager.clone_client_state(client_id)
-                previous_uuid = self.state_manager.get_last_processed_message(client_id)
-                message_uuid = self._get_current_message_uuid()
-                try:
-                    if message_uuid:
-                        self.state_manager.set_last_processed_message(client_id, message_uuid)
-                    else:
-                        logger.warning(f"EOF message for client {client_id} has no UUID; clearing last processed message")
-                        self.state_manager.clear_last_processed_message(client_id)
-
-                    self.state_manager.drop_empty_client_state(client_id)
-                    
-                    if not self.shutdown_requested:
-                        self.state_manager.persist_state(client_id)  # Persist only this client
-                    else:
-                        logger.info("Shutdown requested during EOF handling, skipping state persistence")
-                except Exception:
-                    self.state_manager.restore_client_state(client_id, previous_state)
-                    if message_uuid:
-                        if previous_uuid is None:
-                            self.state_manager.clear_last_processed_message(client_id)
-                        else:
-                            self.state_manager.set_last_processed_message(client_id, previous_uuid)
-                    elif previous_uuid is not None:
-                        self.state_manager.set_last_processed_message(client_id, previous_uuid)
-                    raise
+            # Finalize client: drop all persisted and in-memory state after emitting data/EOF
+            self._clear_client_state(client_id)
 
     def _get_current_message_uuid(self) -> str | None:
         metadata = self._get_current_message_metadata()
