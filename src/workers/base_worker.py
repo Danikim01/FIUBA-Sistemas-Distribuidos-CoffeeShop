@@ -312,9 +312,6 @@ class BaseWorker(ABC):
         finally:
             self._end_pause()
 
-    # ------------------------------------------------------------------
-    # Control message handlers
-    # ------------------------------------------------------------------
     def handle_client_reset(self, client_id: ClientId) -> None:
         """Handle a control message that requests per-client cleanup."""
         logger.info("[CONTROL] %s received client reset for %s (default handler)", self.__class__.__name__, client_id)
