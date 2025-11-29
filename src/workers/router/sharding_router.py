@@ -229,6 +229,22 @@ class ShardingRouter(BaseWorker):
         logger.info("[CONTROL] Global reset received on ShardingRouter, clearing all deduplication state")
         self._processed_store.clear_all()
 
+    def _send_control_to_output(self, message: Dict[str, Any]) -> None:
+        """
+        Base worker method overridden to propagate control messages to every shard when the router publishes to an exchange.
+        """
+        for shard_id in range(self.num_shards):
+            routing_key = f"shard_{shard_id}"
+            try:
+                self.middleware_config.output_middleware.send(message, routing_key=routing_key)
+            except Exception as exc:
+                logger.error(
+                    "[CONTROL] Failed to propagate control message to %s: %s",
+                    routing_key,
+                    exc,
+                    exc_info=True,
+                )
+
 
 if __name__ == '__main__':
     run_main(ShardingRouter)
