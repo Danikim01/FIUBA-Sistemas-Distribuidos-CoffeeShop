@@ -1,17 +1,12 @@
-import os
 import socket
 import logging
 import threading
 import signal
-import sys
-
 from config import GatewayConfig
 from queue_manager import QueueManager
 from client_handler import ClientHandler
-
-
+from boot_handler import handle_boot
 from healthcheck.service import HealthcheckService
-
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,14 +17,12 @@ logger = logging.getLogger(__name__)
 class CoffeeShopGateway:
     def __init__(self):
         self.config = GatewayConfig()
-
         logger.setLevel(self.config.log_level)
-        
+
         self.queue_manager = QueueManager(self.config)
-        try:
-            self.queue_manager.propagate_global_reset()
-        except Exception as exc:
-            logger.error("Failed to broadcast global reset on startup: %s", exc)
+
+        handle_boot(self.queue_manager.propagate_global_reset)
+
         self.client_handler = ClientHandler(self.queue_manager)
         
         self.socket = None
