@@ -219,6 +219,31 @@ class ShardingRouter(BaseWorker):
         logger.info("Cleaning up ShardingRouter")
         super().cleanup()
 
+    def _send_control_to_output(self, message: Dict[str, Any]) -> None:
+        """
+        Base worker method overridden to propagate control messages to every shard when the router publishes to an exchange.
+        """
+        for shard_id in range(self.num_shards):
+            routing_key = f"shard_{shard_id}"
+            shard_message = dict(message)
+            logger.info(
+                "[CONTROL] Propagating control message to %s with message_uuid %s",
+                routing_key,
+                shard_message["message_uuid"],
+            )
+            try:
+                self.middleware_config.output_middleware.send(
+                    shard_message,
+                    routing_key=routing_key,
+                )
+            except Exception as exc:
+                logger.error(
+                    "[CONTROL] Failed to propagate control message to %s: %s",
+                    routing_key,
+                    exc,
+                    exc_info=True,
+                )
+
     def handle_client_reset(self, client_id: ClientId) -> None:
         """Drop any client-specific deduplication files when instructed."""
         logger.info(f"[CONTROL] Client reset received for {client_id} on ShardingRouter")
