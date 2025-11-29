@@ -34,10 +34,12 @@ class MetadataStore(ABC):
         self.current_client_id = ''
         self.eof_state_store = eof_state_store
         self.metadata_type = metadata_type
+        self._stop_event = threading.Event()
         self.consuming_thread = threading.Thread(target=self._start_consuming, daemon=True)
         
     def close(self):
         """Close the middleware connection."""
+        self._stop_event.set()
         self.middleware.close()
         if self.consuming_thread.is_alive():
             self.consuming_thread.join(timeout=10.0)
@@ -133,7 +135,7 @@ class MetadataStore(ABC):
         max_retry_delay = 60
         base_retry_delay = 2
         
-        while True:  # Loop infinito para thread daemon
+        while not self._stop_event.is_set():  # Loop infinito para thread daemon
             try:
                 if retry_count > 0:
                     logger.info(f"[METADATA-STORE {self.name}] Starting consumption (reconnection attempt {retry_count})")
@@ -141,6 +143,9 @@ class MetadataStore(ABC):
                     logger.info(f"[METADATA-STORE {self.name}] Starting consumption")
                 
                 self.middleware.start_consuming(on_message)
+                if self._stop_event.is_set():
+                    logger.info(f"[METADATA-STORE {self.name}] Stop requested, ending consumption loop")
+                    break
                 
                 # Si llegamos aquí, el consumo se detuvo
                 logger.warning(f"Consumption stopped for metadata store {self.name}, will retry...")
@@ -148,7 +153,8 @@ class MetadataStore(ABC):
                 wait_time = min(max_retry_delay, base_retry_delay * (2 ** min(retry_count - 1, 5)))
                 logger.info(f"Waiting {wait_time} seconds before retrying metadata consumption for {self.name}...")
                 time.sleep(wait_time)
-                
+                if self._stop_event.is_set():
+                    break
             except KeyboardInterrupt:
                 logger.info(f"Metadata store {self.name} interrupted")
                 break
