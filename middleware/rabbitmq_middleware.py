@@ -361,6 +361,14 @@ class RabbitMQMiddlewareQueue(_BaseRabbitMQMiddleware):
 
         try:
             user_callback(message)
+        except InterruptedError as exc:
+            logger.info("Requeue requested in '%s': %s", self.queue_name, exc)
+            try:
+                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+            except Exception:
+                logger.error("Failed to NACK after interrupted processing in '%s'; forcing reconnect so broker will requeue", self.queue_name)
+                raise
+            return
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error procesando mensaje en '%s': %s", self.queue_name, exc)
             try:
@@ -657,6 +665,15 @@ class RabbitMQMiddlewareExchange(_BaseRabbitMQMiddleware):
 
         try:
             user_callback(message)
+        except InterruptedError as exc:
+            logger.info("Requeue requested from exchange '%s': %s", self.exchange_name, exc)
+            if shared_queue:
+                try:
+                    ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+                except Exception:
+                    logger.error("Failed to NACK after interrupted processing from '%s'; forcing reconnect so broker will requeue", self.exchange_name)
+                    raise
+            return
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error procesando mensaje desde '%s': %s", self.exchange_name, exc)
             if shared_queue:

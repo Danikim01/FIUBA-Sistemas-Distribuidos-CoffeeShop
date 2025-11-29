@@ -204,6 +204,10 @@ class BaseWorker(ABC):
                 finally:
                     self._decrement_inflight()
 
+            except InterruptedError as e:
+                logger.debug("Message processing interrupted: %s", e)
+                # Re-raise so the middleware can NACK/requeue
+                raise
             except Exception as e:
                 logger.error(f"Error processing message: {e}")
                 # Re-raise the exception so the middleware can NACK
@@ -326,11 +330,7 @@ class BaseWorker(ABC):
 
     def _send_control_to_output(self, message: Dict[str, Any]) -> None:
         """Send the control message to the worker's configured output middleware."""
-        publisher = getattr(self.middleware_config, "output_middleware", None)
-        if not publisher:
-            return
-
         try:
-            publisher.send(message)
+            self.middleware_config.output_middleware.send(message)
         except Exception as exc:
             logger.error("[CONTROL] Failed to propagate control message: %s", exc, exc_info=True)
