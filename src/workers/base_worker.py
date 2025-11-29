@@ -165,11 +165,15 @@ class BaseWorker(ABC):
                 
                 if is_reset_all_clients_message(message):
                     logger.info("[CONTROL] Global reset control message received by %s", self.__class__.__name__)
-                    return self.handle_reset_all_clients()
+                    self.handle_reset_all_clients()
+                    self._send_control_to_output(message)
+                    return
 
                 if is_client_reset_message(message):
                     logger.info("[CONTROL] Client reset message received for %s on %s", client_id, self.__class__.__name__)
-                    return self.handle_client_reset(client_id)
+                    self.handle_client_reset(client_id)
+                    self._send_control_to_output(message)
+                    return
 
                 if is_eof_message(message):
                     logger.info(
@@ -319,3 +323,14 @@ class BaseWorker(ABC):
     def handle_reset_all_clients(self) -> None:
         """Handle a control message that requests global cleanup."""
         logger.info("[CONTROL] %s received global reset (default handler)", self.__class__.__name__)
+
+    def _send_control_to_output(self, message: Dict[str, Any]) -> None:
+        """Send the control message to the worker's configured output middleware."""
+        publisher = getattr(self.middleware_config, "output_middleware", None)
+        if not publisher:
+            return
+
+        try:
+            publisher.send(message)
+        except Exception as exc:
+            logger.error("[CONTROL] Failed to propagate control message: %s", exc, exc_info=True)
