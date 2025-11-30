@@ -7,7 +7,6 @@ from workers.utils.message_utils import ClientId # pyright: ignore[reportMissing
 from workers.sharded_process.process_worker import ProcessWorker
 from workers.sharded_process.tpv import StoreId, YearHalf
 from workers.metadata_store.stores import StoresMetadataStore
-from common.persistence.processed_message_store import ProcessedMessageStore
 from common.persistence.eof_counter_store import EOFCounterStore
 from common.persistence.aggregator_state_store import AggregatorStateStore
 from common.persistence.metadata.metadata_eof_state_store import MetadataEOFStateStore
@@ -33,14 +32,14 @@ class TPVAggregator(ProcessWorker):
         # Number of sharded workers we expect EOFs from (must be set before loading state)
         self.expected_eof_count = int(os.getenv('REPLICA_COUNT', '2'))
         
-        # Fault tolerance: Track processed message UUIDs
-        self.processed_messages = ProcessedMessageStore(worker_label="tpv_aggregator")
-        
         # Fault tolerance: Track EOF counters with deduplication
         self.eof_counter_store = EOFCounterStore(worker_label="tpv_aggregator")
         
         # Fault tolerance: Persist intermediate aggregation state
         self.state_store = AggregatorStateStore(worker_label="tpv_aggregator")
+        
+        # Track last processed message UUID per client (stored in state_store)
+        self._last_processed_message: Dict[ClientId, str] = {}
         
         # Load persisted state on startup
         self.recieved_payloads: DefaultDict[
@@ -75,6 +74,9 @@ class TPVAggregator(ProcessWorker):
                     f"[TPV-AGGREGATOR] Restored aggregation state for client {client_id} "
                     f"(EOF count: {eof_count}/{self.expected_eof_count})"
                 )
+            
+            if 'last_processed_uuid' in state:
+                self._last_processed_message[client_id] = state['last_processed_uuid']
     
     def _load_persisted_eof_counters(self) -> None:
         """Load persisted EOF counters for all clients on startup."""
@@ -84,11 +86,11 @@ class TPVAggregator(ProcessWorker):
         """Clear all state and persistence for a client."""
         with self._state_lock:
             self.recieved_payloads.pop(client_id, None)
+            self._last_processed_message.pop(client_id, None)
 
         self.stores_source.reset_state(client_id)
         self.state_store.clear_client(client_id)
         self.metadata_eof_state.clear_client(client_id)
-        self.processed_messages.clear_client(client_id)
         self.eof_counter_store.clear_client(client_id)
 
     def reset_state(self, client_id: ClientId) -> None:
@@ -121,7 +123,7 @@ class TPVAggregator(ProcessWorker):
         message_uuid = self._get_current_message_uuid()
         
         # Check for duplicate message
-        if message_uuid and self.processed_messages.has_processed(client_id, message_uuid):
+        if message_uuid and self._last_processed_message.get(client_id) == message_uuid:
             logger.info(
                 f"[TPV-AGGREGATOR] [DUPLICATE] Skipping duplicate batch {message_uuid} "
                 f"for client {client_id} (already processed)"
@@ -132,13 +134,13 @@ class TPVAggregator(ProcessWorker):
         with self._state_lock:
             for entry in batch:
                 self.process_transaction(client_id, entry)
+            
+            # Update last processed message UUID
+            if message_uuid:
+                self._last_processed_message[client_id] = message_uuid
         
         # Persist state after processing batch (for fault tolerance)
         self._persist_state(client_id)
-        
-        # Mark message as processed after successful processing
-        if message_uuid:
-            self.processed_messages.mark_processed(client_id, message_uuid)
     
     def _persist_state(self, client_id: ClientId) -> None:
         """Persist the current aggregation state for a client."""
@@ -147,7 +149,8 @@ class TPVAggregator(ProcessWorker):
             payloads_data[year_half] = {str(k): v for k, v in stores.items()}
         
         state_data = {
-            'recieved_payloads': payloads_data
+            'recieved_payloads': payloads_data,
+            'last_processed_uuid': self._last_processed_message.get(client_id)
         }
         self.state_store.save_state(client_id, state_data)
 
@@ -272,11 +275,11 @@ class TPVAggregator(ProcessWorker):
         logger.info("[CONTROL] TPVAggregator received global reset request")
         with self._state_lock:
             self.recieved_payloads.clear()
+            self._last_processed_message.clear()
 
         self.stores_source.reset_all()
         self.state_store.clear_all()
         self.metadata_eof_state.clear_all()
-        self.processed_messages.clear_all()
         self.eof_counter_store.clear_all()
 
 
