@@ -88,15 +88,15 @@ class TestProcessedMessageStore:
             assert not new_store.has_processed(client_id, uuid3)
     
     def test_corrupted_json_file(self, store, temp_dir):
-        """Test handling of corrupted JSON files."""
+        """Test handling of corrupted text files."""
         client_id = "test-client-corrupted"
         
-        # Create a corrupted JSON file
+        # Create a corrupted text file (with invalid content)
         store_path = Path(temp_dir) / "processed_messages" / "test-worker"
         store_path.mkdir(parents=True, exist_ok=True)
         safe_id = client_id.replace('/', '_').replace('\\', '_').replace(':', '_')
-        corrupted_file = store_path / f"{safe_id}.json"
-        corrupted_file.write_text("not valid json { invalid }", encoding="utf-8")
+        corrupted_file = store_path / f"{safe_id}.txt"
+        corrupted_file.write_text("invalid content with null bytes\x00\x00", encoding="utf-8")
         
         # Store should handle corruption gracefully
         with patch.dict(os.environ, {'STATE_DIR': temp_dir}):
@@ -108,14 +108,14 @@ class TestProcessedMessageStore:
             assert new_store.has_processed(client_id, "new-uuid")
     
     def test_empty_json_file(self, store, temp_dir):
-        """Test handling of empty JSON files."""
+        """Test handling of empty text files."""
         client_id = "test-client-empty"
         
-        # Create an empty JSON file
+        # Create an empty text file
         store_path = Path(temp_dir) / "processed_messages" / "test-worker"
         store_path.mkdir(parents=True, exist_ok=True)
         safe_id = client_id.replace('/', '_').replace('\\', '_').replace(':', '_')
-        empty_file = store_path / f"{safe_id}.json"
+        empty_file = store_path / f"{safe_id}.txt"
         empty_file.write_text("", encoding="utf-8")
         
         with patch.dict(os.environ, {'STATE_DIR': temp_dir}):
@@ -126,15 +126,15 @@ class TestProcessedMessageStore:
             assert new_store.has_processed(client_id, "new-uuid")
     
     def test_invalid_json_structure(self, store, temp_dir):
-        """Test handling of JSON files with invalid structure (not a list)."""
+        """Test handling of text files with invalid content (not UUID format)."""
         client_id = "test-client-invalid-structure"
         
-        # Create JSON file with invalid structure (object instead of list)
+        # Create text file with invalid content (not UUIDs per line)
         store_path = Path(temp_dir) / "processed_messages" / "test-worker"
         store_path.mkdir(parents=True, exist_ok=True)
         safe_id = client_id.replace('/', '_').replace('\\', '_').replace(':', '_')
-        invalid_file = store_path / f"{safe_id}.json"
-        invalid_file.write_text('{"not": "a list"}', encoding="utf-8")
+        invalid_file = store_path / f"{safe_id}.txt"
+        invalid_file.write_text("not a valid uuid line\nanother invalid line\n", encoding="utf-8")
         
         with patch.dict(os.environ, {'STATE_DIR': temp_dir}):
             new_store = ProcessedMessageStore("test-worker")
@@ -301,21 +301,23 @@ class TestProcessedMessageStore:
         # Mark first UUID
         store.mark_processed(client_id, uuid1)
         
-        # Simulate crash by creating a partial temp file
+        # Simulate crash by manually appending incomplete UUID to file
+        # (truncated UUID that won't match the full UUID)
         store_path = Path(temp_dir) / "processed_messages" / "test-worker"
         safe_id = client_id.replace('/', '_').replace('\\', '_').replace(':', '_')
-        path = store_path / f"{safe_id}.json"
-        tmp_path = path.with_suffix(".json.tmp")
+        path = store_path / f"{safe_id}.txt"
         
-        # Create incomplete temp file
-        tmp_path.write_text('["uuid-1", "uuid-2", "incomplete', encoding="utf-8")
+        # Append incomplete UUID (truncated) to simulate crash during write
+        # This simulates a crash where only part of the UUID was written
+        with path.open('a', encoding='utf-8') as f:
+            f.write("uuid-")  # Incomplete UUID (truncated, no newline)
         
-        # Create new store - should handle partial file gracefully
+        # Create new store - should handle partial UUID gracefully
         with patch.dict(os.environ, {'STATE_DIR': temp_dir}):
             new_store = ProcessedMessageStore("test-worker")
             # Should still have uuid1 from previous successful write
             assert new_store.has_processed(client_id, uuid1)
-            # uuid2 should not be there (incomplete write)
+            # uuid2 should not be there (incomplete write, truncated UUID won't match)
             assert not new_store.has_processed(client_id, uuid2)
     
     def test_large_number_of_uuids(self, store):
@@ -388,7 +390,7 @@ class TestProcessedMessageStore:
         assert store.has_processed(client_id, uuid2)
     
     def test_atomic_write(self, store, temp_dir):
-        """Test that writes are atomic (temp file pattern)."""
+        """Test that writes are atomic (append-only with fsync)."""
         client_id = "test-client-atomic"
         uuid1 = "uuid-1"
         uuid2 = "uuid-2"
@@ -397,26 +399,34 @@ class TestProcessedMessageStore:
         store.mark_processed(client_id, uuid1)
         store.mark_processed(client_id, uuid2)
         
-        # Verify file exists and temp file doesn't
+        # Verify file exists (uses .txt extension, not .json)
         store_path = Path(temp_dir) / "processed_messages" / "test-worker"
         safe_id = client_id.replace('/', '_').replace('\\', '_').replace(':', '_')
-        path = store_path / f"{safe_id}.json"
-        tmp_path = path.with_suffix(".json.tmp")
+        path = store_path / f"{safe_id}.txt"
         
-        assert path.exists()
-        assert not tmp_path.exists()  # Temp file should be cleaned up
+        assert path.exists(), f"File {path} should exist after marking UUIDs"
+        
+        # Verify file content contains both UUIDs
+        content = path.read_text(encoding='utf-8')
+        assert uuid1 in content
+        assert uuid2 in content
     
-    def test_json_encoding(self, store):
-        """Test that JSON encoding handles special characters correctly."""
+    def test_json_encoding(self, store, temp_dir):
+        """Test that text file encoding handles special characters correctly."""
         client_id = "test-client-encoding"
-        uuid_with_special = 'uuid-"quotes"-\\backslash-\nnewline-\ttab'
+        # Use special characters that can be stored in a single line (no actual newlines)
+        # The format uses one UUID per line, so newlines in UUIDs would break the format
+        uuid_with_special = 'uuid-"quotes"-\\backslash-tab\t-unicode-ñ-中文-🚀'
         
         store.mark_processed(client_id, uuid_with_special)
         assert store.has_processed(client_id, uuid_with_special)
         
         # Should persist and restore correctly
-        store2 = ProcessedMessageStore("test-worker")
-        assert store2.has_processed(client_id, uuid_with_special)
+        # The _append_uuid method already does fsync, so data should be on disk
+        with patch.dict(os.environ, {'STATE_DIR': temp_dir}):
+            store2 = ProcessedMessageStore("test-worker")
+            assert store2.has_processed(client_id, uuid_with_special), \
+                f"UUID {uuid_with_special!r} should be found after restore"
     
     def test_clear_then_new_messages(self, store):
         """Test that after clearing, new messages can be processed."""
