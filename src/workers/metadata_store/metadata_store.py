@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import logging
 import threading
 from typing import Any, Optional
-from message_utils import (
+from workers.utils.message_utils import (
     ClientId,
     extract_data_and_client_id,
     is_client_reset_message,

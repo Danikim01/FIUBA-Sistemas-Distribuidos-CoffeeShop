@@ -1,4 +1,4 @@
-from message_utils import ClientId
+from workers.utils.message_utils import ClientId
 from workers.state_manager.state_manager import StateManager
 
 

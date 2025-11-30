@@ -9,9 +9,9 @@ import uuid
 
 from workers.base_worker import BaseWorker
 from workers.utils.worker_utils import run_main
-from workers.utils.message_utils import ClientId, is_eof_message, extract_message_uuid
-from workers.utils.eof_counter_store import EOFCounterStore
-from workers.utils.processed_message_store import ProcessedMessageStore
+from workers.utils.message_utils import ClientId, extract_message_uuid
+from common.persistence.eof_counter_store import EOFCounterStore
+from common.persistence.processed_message_store import ProcessedMessageStore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

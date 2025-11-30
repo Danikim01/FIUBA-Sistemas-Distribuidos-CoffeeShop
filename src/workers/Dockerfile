@@ -22,7 +22,8 @@ COPY src/workers /app/src/workers
 COPY src/healthcheck /app/src/healthcheck
 
 # Ensure all modules are importable
-ENV PYTHONPATH=/app:/app/src:/app/src/workers:/app/src/workers/utils
+# /app/src allows imports from workers.utils, common.persistence, etc.
+ENV PYTHONPATH=/app:/app/src
 
 # Run commands from workers directory by default
 WORKDIR /app/src/workers

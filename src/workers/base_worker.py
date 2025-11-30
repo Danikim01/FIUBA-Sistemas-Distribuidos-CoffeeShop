@@ -4,9 +4,9 @@ import threading
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List
 from contextlib import contextmanager
-from handle_eof import EOFHandler # pyright: ignore[reportMissingImports]
-from middleware_config import MiddlewareConfig # pyright: ignore[reportMissingImports]
-from message_utils import ( # pyright: ignore[reportMissingImports]
+from common.EOF.handle_eof import EOFHandler # pyright: ignore[reportMissingImports]
+from common.middleware.middleware_config import MiddlewareConfig # pyright: ignore[reportMissingImports]
+from workers.utils.message_utils import ( # pyright: ignore[reportMissingImports]
     ClientId,
     extract_data_and_client_id,
     extract_sequence_id,

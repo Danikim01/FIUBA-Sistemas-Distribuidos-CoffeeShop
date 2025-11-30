@@ -2,10 +2,10 @@ import logging
 import os
 import sys
 from typing import Dict
-from message_utils import ClientId
-from middleware_config import MiddlewareConfig
+from workers.utils.message_utils import ClientId
+from common.middleware.middleware_config import MiddlewareConfig
 from workers.metadata_store.metadata_store import MetadataStore
-from workers.utils.metadata_persistence_store import MetadataPersistenceStore
+from common.persistence.metadata.metadata_persistence_store import MetadataPersistenceStore
 
 logger = logging.getLogger(__name__)
 

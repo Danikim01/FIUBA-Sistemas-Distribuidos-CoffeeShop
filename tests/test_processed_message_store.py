@@ -17,17 +17,11 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SRC_PATH = PROJECT_ROOT / "src"
-WORKERS_PATH = SRC_PATH / "workers"
-UTILS_PATH = WORKERS_PATH / "utils"
 
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
-if str(WORKERS_PATH) not in sys.path:
-    sys.path.insert(0, str(WORKERS_PATH))
-if str(UTILS_PATH) not in sys.path:
-    sys.path.insert(0, str(UTILS_PATH))
 
-from workers.utils.processed_message_store import ProcessedMessageStore
+from common.persistence.processed_message_store import ProcessedMessageStore  # pyright: ignore[reportMissingImports]
 
 
 class TestProcessedMessageStore:

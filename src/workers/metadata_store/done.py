@@ -3,7 +3,7 @@ import logging
 import os
 import threading
 from pathlib import Path
-from message_utils import ClientId
+from workers.utils.message_utils import ClientId
 
 logger = logging.getLogger(__name__)
 

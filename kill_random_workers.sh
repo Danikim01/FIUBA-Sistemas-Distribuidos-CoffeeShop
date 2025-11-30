@@ -3,7 +3,7 @@
 set -euo pipefail
 
 COMPOSE_CMD=${COMPOSE_CMD:-"docker compose"}
-KILL_INTERVAL=0.25    # seconds between kills
+KILL_INTERVAL=1    # seconds between kills
 KILL_COUNT=0         # 0 => infinite
 
 # Worker type flags

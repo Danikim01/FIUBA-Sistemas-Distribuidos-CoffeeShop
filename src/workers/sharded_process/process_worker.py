@@ -7,8 +7,8 @@ from asyncio.log import logger
 import threading
 from typing import Any, Dict, TypeVar
 
-from message_utils import ClientId # pyright: ignore[reportMissingImports]
-from worker_utils import get_payload_len # pyright: ignore[reportMissingImports]
+from workers.utils.message_utils import ClientId # pyright: ignore[reportMissingImports]
+from workers.utils.worker_utils import get_payload_len # pyright: ignore[reportMissingImports]
 from workers.base_worker import BaseWorker
 
 StateDict = Dict[str, Any]

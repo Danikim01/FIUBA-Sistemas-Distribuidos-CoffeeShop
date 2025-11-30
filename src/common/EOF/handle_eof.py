@@ -3,8 +3,8 @@ import os
 import threading
 from contextlib import suppress
 from typing import Any, Dict, Optional
-from message_utils import ClientId, create_message_with_metadata, extract_data_and_client_id, extract_eof_metadata, extract_sequence_id, extract_message_uuid
-from middleware_config import MiddlewareConfig
+from workers.utils.message_utils import ClientId, create_message_with_metadata, extract_data_and_client_id, extract_eof_metadata, extract_sequence_id, extract_message_uuid
+from common.middleware.middleware_config import MiddlewareConfig
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
 
 logger = logging.getLogger(__name__)

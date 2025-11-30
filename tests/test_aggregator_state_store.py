@@ -26,7 +26,7 @@ if str(WORKERS_PATH) not in sys.path:
 if str(UTILS_PATH) not in sys.path:
     sys.path.insert(0, str(UTILS_PATH))
 
-from workers.utils.aggregator_state_store import AggregatorStateStore
+from common.persistence.aggregator_state_store import AggregatorStateStore
 
 
 class TestAggregatorStateStore:

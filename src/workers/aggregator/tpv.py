@@ -3,15 +3,15 @@ import logging
 import os
 import threading
 from typing import Any, DefaultDict, Dict, List, Optional
-from message_utils import ClientId # pyright: ignore[reportMissingImports]
+from workers.utils.message_utils import ClientId # pyright: ignore[reportMissingImports]
 from workers.sharded_process.process_worker import ProcessWorker
 from workers.sharded_process.tpv import StoreId, YearHalf
 from workers.metadata_store.stores import StoresMetadataStore
-from workers.utils.processed_message_store import ProcessedMessageStore
-from workers.utils.eof_counter_store import EOFCounterStore
-from workers.utils.aggregator_state_store import AggregatorStateStore
-from workers.utils.metadata_eof_state_store import MetadataEOFStateStore
-from worker_utils import normalize_tpv_entry, safe_int_conversion, tpv_sort_key, run_main # pyright: ignore[reportMissingImports]
+from common.persistence.processed_message_store import ProcessedMessageStore
+from common.persistence.eof_counter_store import EOFCounterStore
+from common.persistence.aggregator_state_store import AggregatorStateStore
+from common.persistence.metadata.metadata_eof_state_store import MetadataEOFStateStore
+from workers.utils.worker_utils import normalize_tpv_entry, safe_int_conversion, tpv_sort_key, run_main # pyright: ignore[reportMissingImports]
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

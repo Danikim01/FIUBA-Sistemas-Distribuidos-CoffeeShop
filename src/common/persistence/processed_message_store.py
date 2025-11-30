@@ -9,7 +9,7 @@ import threading
 from pathlib import Path
 from typing import Dict, Set
 
-from message_utils import ClientId
+from workers.utils.message_utils import ClientId
 
 logger = logging.getLogger(__name__)
 

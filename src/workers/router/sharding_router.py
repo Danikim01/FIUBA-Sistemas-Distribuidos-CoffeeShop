@@ -16,7 +16,7 @@ from workers.utils.sharding_utils import (
     get_routing_key_by_item_id,
 )
 from workers.utils.message_utils import ClientId
-from workers.utils.processed_message_store import ProcessedMessageStore
+from common.persistence.processed_message_store import ProcessedMessageStore
 from workers.base_worker import BaseWorker
 
 logging.basicConfig(level=logging.INFO)
