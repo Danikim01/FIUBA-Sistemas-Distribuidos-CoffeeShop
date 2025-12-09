@@ -213,4 +213,6 @@ docker-compose-scaled.yml
 src/client/.data/
 results/
 src/client/tmp/
+# Zone.Identifier files (Windows/WSL metadata)
+*:Zone.Identifier
 Informe_TP_N_1_Sistemas_Distribuidos.pdf:Zone.Identifier
